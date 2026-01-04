@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Gestor de Finanzas del Hogar - 100% offline con categorías personalizables">
+    <meta name="theme-color" content="#2196F3">
+    <title>Finanzas del Hogar Pro</title>
+    <link rel="manifest" href="manifest.json">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 0;
+            color: #333;
+        }
+
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: 280px;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            overflow-y: auto;
+            z-index: 999;
+            transform: translateX(-100%);
+            transition: transform 0.3s ease;
+        }
+
+        .sidebar.active {
+            transform: translateX(0);
+        }
+
+        .sidebar-header {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid rgba(255,255,255,0.3);
+        }
+
+        .sidebar-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .sidebar-nav button {
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 12px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: left;
+            font-size: 14px;
+            font-weight: 500;
+            transition: 0.3s;
+        }
+
+        .sidebar-nav button:hover,
+        .sidebar-nav button.active {
+            background: rgba(255,255,255,0.4);
+        }
+
+        .sidebar-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 998;
+            display: none;
+        }
+
+        .sidebar-overlay.active {
+            display: block;
+        }
+
+        .container {
+            margin-left: 0;
+            width: 100%;
+            background: white;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            transition: margin-left 0.3s ease;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .menu-toggle {
+            background: rgba(255,255,255,0.3);
+            border: none;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 20px;
+            transition: 0.3s;
+        }
+
+        .menu-toggle:hover {
+            background: rgba(255,255,255,0.5);
+        }
+
+        header h1 {
+            font-size: 24px;
+            flex: 1;
+            text-align: center;
+        }
+
+        .month-nav {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .month-nav button {
+            background: rgba(255,255,255,0.3);
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: 0.3s;
+        }
+
+        .month-nav button:hover {
+            background: rgba(255,255,255,0.5);
+        }
+
+        #monthDisplay {
+            font-weight: bold;
+            min-width: 150px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        nav {
+            display: flex;
+            gap: 0;
+            background: #f5f5f5;
+            border-bottom: 2px solid #eee;
+            flex-wrap: wrap;
+            padding: 0;
+        }
+
+        nav button {
+            flex: 1;
+            padding: 15px 10px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            border-bottom: 3px solid transparent;
+            transition: 0.3s;
+            white-space: nowrap;
+            min-width: 100px;
+        }
+
+        nav button:hover {
+            background: #f0f0f0;
+        }
+
+        nav button.active {
+            border-bottom-color: #667eea;
+            color: #667eea;
+        }
+
+        .content {
+            padding: 20px;
+            flex: 1;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .summary-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+
+        .summary-card h3 {
+            font-size: 14px;
+            opacity: 0.9;
+            margin-bottom: 10px;
+        }
+
+        .summary-card .amount {
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        .modal.active {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-content h2 {
+            margin-bottom: 20px;
+            color: #667eea;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #555;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 5px rgba(102, 126, 234, 0.3);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: 0.3s;
+            font-size: 14px;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+            flex: 1;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+            flex: 1;
+        }
+
+        .btn-secondary:hover {
+            background: #d0d0d0;
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .transaction-item {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 4px solid #667eea;
+        }
+
+        .transaction-item.expense {
+            border-left-color: #f44336;
+        }
+
+        .transaction-item.income {
+            border-left-color: #4CAF50;
+        }
+
+        .transaction-info {
+            flex: 1;
+        }
+
+        .transaction-info h4 {
+            margin: 0 0 5px 0;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .transaction-info p {
+            margin: 0;
+            font-size: 12px;
+            color: #999;
+        }
+
+        .transaction-amount {
+            font-weight: bold;
+            font-size: 16px;
+            min-width: 80px;
+            text-align: right;
+        }
+
+        .transaction-amount.expense {
+            color: #f44336;
+        }
+
+        .transaction-amount.income {
+            color: #4CAF50;
+        }
+
+        .list-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin: 20px 0;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .chart-container.large {
+            height: 400px;
+        }
+
+        .settings-section {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .settings-section h3 {
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .category-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .category-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .category-card .icon {
+            font-size: 24px;
+            margin-right: 10px;
+        }
+
+        .category-card .info {
+            flex: 1;
+        }
+
+        .category-card .info h4 {
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .category-card .actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .forecast-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .forecast-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .forecast-card h4 {
+            margin: 0 0 10px 0;
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        .forecast-card .amount {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #eee;
+            flex-wrap: wrap;
+        }
+
+        .tabs button {
+            background: none;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            color: #999;
+            font-weight: 500;
+            transition: 0.3s;
+        }
+
+        .tabs button.active {
+            border-bottom-color: #667eea;
+            color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .action-buttons button {
+            flex: 1;
+            min-width: 150px;
+            padding: 12px 20px;
+            background: white;
+            border: 2px solid #667eea;
+            color: #667eea;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: 0.3s;
+        }
+
+        .action-buttons button:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .alert-box {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+
+        .alert-box.danger {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+
+        .alert-box.success {
+            background: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+
+        @media (max-width: 768px) {
+            header {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            header h1 {
+                font-size: 20px;
+            }
+
+            nav button {
+                font-size: 12px;
+                min-width: 80px;
+                padding: 12px 8px;
+            }
+
+            .summary-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .category-list {
+                grid-template-columns: 1fr;
+            }
+
+            .chart-container {
+                height: 250px;
+            }
+
+            #monthDisplay {
+                font-size: 12px;
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- SIDEBAR OVERLAY -->
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+    <!-- SIDEBAR MENÚ -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">💰 Finanzas</div>
+        <div class="sidebar-nav">
+            <button onclick="switchSection('dashboard'); toggleSidebar()" class="active">📊 Dashboard</button>
+            <button onclick="switchSection('expenses'); toggleSidebar()">💸 Gastos</button>
+            <button onclick="switchSection('income'); toggleSidebar()">💹 Ingresos</button>
+            <button onclick="switchSection('loans'); toggleSidebar()">🔄 Préstamos</button>
+            <button onclick="switchSection('credits'); toggleSidebar()">💳 Créditos</button>
+            <button onclick="switchSection('forecast'); toggleSidebar()">📈 Pronóstico</button>
+            <button onclick="switchSection('settings'); toggleSidebar()">⚙️ Configuración</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+            <h1>💰 Finanzas del Hogar Pro</h1>
+            <div class="month-nav">
+                <button onclick="previousMonth()">◀</button>
+                <span id="monthDisplay">Enero 2026</span>
+                <button onclick="nextMonth()">▶</button>
+            </div>
+        </header>
+
+        <nav>
+            <button class="nav-btn active" onclick="switchSection('dashboard')">📊 Dashboard</button>
+            <button class="nav-btn" onclick="switchSection('expenses')">💸 Gastos</button>
+            <button class="nav-btn" onclick="switchSection('income')">💹 Ingresos</button>
+            <button class="nav-btn" onclick="switchSection('loans')">🔄 Préstamos</button>
+            <button class="nav-btn" onclick="switchSection('credits')">💳 Créditos</button>
+            <button class="nav-btn" onclick="switchSection('forecast')">📈 Pronóstico</button>
+            <button class="nav-btn" onclick="switchSection('settings')">⚙️ Configuración</button>
+        </nav>
+
+        <div class="content">
+            <!-- DASHBOARD SECTION -->
+            <div id="dashboard" class="section active">
+                <div class="summary-grid">
+                    <div class="summary-card">
+                        <h3>💸 Gastos</h3>
+                        <div class="amount" id="totalExpenses">$0</div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>💹 Ingresos</h3>
+                        <div class="amount" id="totalIncome">$0</div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>💰 Saldo</h3>
+                        <div class="amount" id="balance">$0</div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>🔄 A Devolver</h3>
+                        <div class="amount" id="toReturn">$0</div>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                        <h3>📊 Gastos por Categoría</h3>
+                        <div class="chart-container">
+                            <canvas id="categoryChart"></canvas>
+                        </div>
+                    </div>
+                    <div>
+                        <h3>📈 Ingresos vs Gastos</h3>
+                        <div class="chart-container">
+                            <canvas id="incomeVsExpenseChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 30px;">📋 Últimas Transacciones</h3>
+                <div class="list-container" id="recentTransactions">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <p>No hay transacciones este mes</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EXPENSES SECTION -->
+            <div id="expenses" class="section">
+                <div class="action-buttons">
+                    <button onclick="openModal('expenseModal')" class="btn-primary">➕ Nuevo Gasto</button>
+                </div>
+                <div class="list-container" id="expensesList">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">💸</div>
+                        <p>No hay gastos registrados</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- INCOME SECTION -->
+            <div id="income" class="section">
+                <div class="action-buttons">
+                    <button onclick="openModal('incomeModal')" class="btn-primary">➕ Nuevo Ingreso</button>
+                </div>
+                <div class="list-container" id="incomeList">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">💹</div>
+                        <p>No hay ingresos registrados</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- LOANS SECTION -->
+            <div id="loans" class="section">
+                <div class="action-buttons">
+                    <button onclick="openModal('loanModal')" class="btn-primary">➕ Nuevo Préstamo</button>
+                </div>
+                <div id="loansAlerts"></div>
+                <div class="list-container" id="loansList">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🔄</div>
+                        <p>No hay préstamos registrados</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CREDITS SECTION -->
+            <div id="credits" class="section">
+                <div class="action-buttons">
+                    <button onclick="openModal('creditModal')" class="btn-primary">➕ Nuevo Crédito</button>
+                </div>
+                <div id="creditsAlerts"></div>
+                <div class="list-container" id="creditsList">
+                    <div class="empty-state">
+                        <div class="empty-state-icon">💳</div>
+                        <p>No hay créditos registrados</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- FORECAST SECTION -->
+            <div id="forecast" class="section">
+                <h3>📈 Pronóstico de 6 Meses</h3>
+                <div class="tabs">
+                    <button class="active" onclick="switchForecastTab('expenses')">💸 Gastos Proyectados</button>
+                    <button onclick="switchForecastTab('income')">💹 Ingresos Proyectados</button>
+                    <button onclick="switchForecastTab('balance')">💰 Balance Proyectado</button>
+                </div>
+
+                <div id="expensesForecast" class="tab-content active">
+                    <div class="chart-container large">
+                        <canvas id="expensesForecastChart"></canvas>
+                    </div>
+                </div>
+
+                <div id="incomeForecast" class="tab-content">
+                    <div class="chart-container large">
+                        <canvas id="incomeForecastChart"></canvas>
+                    </div>
+                </div>
+
+                <div id="balanceForecast" class="tab-content">
+                    <div class="chart-container large">
+                        <canvas id="balanceForecastChart"></canvas>
+                    </div>
+                </div>
+
+                <h3 style="margin-top: 30px;">📋 Resumen de Proyecciones</h3>
+                <div id="forecastSummary" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                </div>
+            </div>
+
+            <!-- SETTINGS SECTION -->
+            <div id="settings" class="section">
+                <div class="settings-section">
+                    <h3>🏷️ Gestionar Categorías de Gastos</h3>
+                    <button onclick="openModal('newCategoryModal')" class="btn-primary" style="margin-bottom: 15px;">➕ Agregar Nueva Categoría</button>
+                    <div class="category-list" id="categoriesList"></div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>📊 Gestión de Datos</h3>
+                    <button onclick="exportData()" class="btn-primary">📥 Descargar Copia de Seguridad</button>
+                    <button onclick="document.getElementById('importFile').click()" class="btn-secondary">📤 Restaurar Copia de Seguridad</button>
+                    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importData(event)">
+                    <button onclick="clearAllData()" class="btn-danger" style="margin-left: 10px;">🗑️ Limpiar Todo</button>
+                </div>
+
+                <div class="settings-section">
+                    <h3>📱 Información</h3>
+                    <p><strong>Versión:</strong> 4.1.0</p>
+                    <p><strong>Almacenamiento:</strong> IndexedDB (100% local)</p>
+                    <p><strong>Compatibilidad:</strong> iOS y Android</p>
+                    <p style="margin-top: 15px; color: #666;">✅ Todos tus datos se guardan 100% localmente en tu dispositivo. No necesitas conexión a internet.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALS -->
+    <!-- Expense Modal -->
+    <div id="expenseModal" class="modal">
+        <div class="modal-content">
+            <h2>➕ Nuevo Gasto</h2>
+            <form onsubmit="saveExpense(event)">
+                <div class="form-group">
+                    <label>Fecha</label>
+                    <input type="date" id="expenseDate" required>
+                </div>
+                <div class="form-group">
+                    <label>Categoría</label>
+                    <select id="expenseCategory" required>
+                        <option value="">Selecciona una categoría</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Descripción</label>
+                    <input type="text" id="expenseDescription" placeholder="Ej: Compras en el supermercado" required>
+                </div>
+                <div class="form-group">
+                    <label>Monto</label>
+                    <input type="number" id="expenseAmount" step="0.01" placeholder="0.00" required>
+                </div>
+                <div class="button-group">
+                    <button type="submit" class="btn-primary">💾 Guardar Gasto</button>
+                    <button type="button" class="btn-secondary" onclick="closeModal('expenseModal')">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Income Modal -->
+    <div id="incomeModal" class="modal">
+        <div class="modal-content">
+            <h2>➕ Nuevo Ingreso</h2>
+            <form onsubmit="saveIncome(event)">
+                <div class="form-group">
+                    <label>Fecha</label>
+                    <input type="date" id="incomeDate" required>
+                </div>
+                <div class="form-group">
+                    <label>Tipo de Ingreso</label>
+                    <select id="incomeType" onchange="updateIncomeForm()" required>
+                        <option value="salary">💼 Sueldo</option>
+                        <option value="gift">🎁 Regalo</option>
+                        <option value="sale">🛍️ Venta</option>
+                        <option value="other">📌 Otro</option>
+                    </select>
+                </div>
+                <div id="salaryFields" style="display:none;">
+                    <div class="form-group">
+                        <label>Mes</label>
+                        <input type="month" id="salaryMonth" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Descripción</label>
+                    <input type="text" id="incomeDescription" placeholder="Ej: Sueldo mensual" required>
+                </div>
+                <div class="form-group">
+                    <label>Monto</label>
+                    <input type="number" id="incomeAmount" step="0.01" placeholder="0.00" required>
+                </div>
+                <div class="button-group">
+                    <button type="submit" class="btn-primary">💾 Guardar Ingreso</button>
+                    <button type="button" class="btn-secondary" onclick="closeModal('incomeModal')">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Loan Modal -->
+    <div id="loanModal" class="modal">
+        <div class="modal-content">
+            <h2>🔄 Nuevo Préstamo</h2>
+            <form onsubmit="saveLoan(event)">
+                <div class="form-group">
+                    <label>Tipo de Préstamo</label>
+                    <select id="loanType" onchange="updateLoanTypeFields()" required>
+                        <option value="egreso">📤 Egreso (Yo presté dinero)</option>
+                        <option value="ingreso">📥 Ingreso (Me prestaron dinero)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Persona</label>
+                    <input type="text" id="loanPerson" placeholder="Nombre de la persona" required>
+                </div>
+                <div class="form-group">
+                    <label>Monto Total</label>
+                    <input type="number" id="loanAmount" step="0.01" placeholder="0.00" required>
+                </div>
+                <div class="form-group">
+                    <label>Tipo de Pago</label>
+                    <select id="loanPaymentType" required>
+                        <option value="single">💵 Pago Único</option>
+                        <option value="installments">📅 Cuotas</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Fecha Acordada de Devolución</label>
+                    <input type="date" id="loanDueDate" required>
+                </div>
+                <div class="form-group">
+                    <label>Descripción</label>
+                    <textarea id="loanDescription" placeholder="Notas sobre el préstamo..."></textarea>
+                </div>
+                <div class="button-group">
+                    <button type="submit" class="btn-primary">💾 Guardar Préstamo</button>
+                    <button type="button" class="btn-secondary" onclick="closeModal('loanModal')">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Credit Modal -->
+    <div id="creditModal" class="modal">
+        <div class="modal-content">
+            <h2>💳 Nuevo Crédito</h2>
+            <form onsubmit="saveCredit(event)">
+                <div class="form-group">
+                    <label>Descripción</label>
+                    <input type="text" id="creditDescription" placeholder="Ej: Crédito Banco X" required>
+                </div>
+                <div class="form-group">
+                    <label>Monto Total</label>
+                    <input type="number" id="creditAmount" step="0.01" placeholder="0.00" required>
+                </div>
+                <div class="form-group">
+                    <label>Monto Pagado</label>
+                    <input type="number" id="creditPaid" step="0.01" placeholder="0.00" value="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Tasa de Interés (%)</label>
+                    <input type="number" id="creditRate" step="0.01" placeholder="0.00" value="0">
+                </div>
+                <div class="form-group">
+                    <label>Fecha de Inicio</label>
+                    <input type="date" id="creditStartDate" required>
+                </div>
+                <div class="form-group">
+                    <label>Fecha de Vencimiento</label>
+                    <input type="date" id="creditDueDate" required>
+                </div>
+                <div class="form-group">
+                    <label>Número de Cuotas</label>
+                    <input type="number" id="creditInstallments" placeholder="12" value="12">
+                </div>
+                <div class="button-group">
+                    <button type="submit" class="btn-primary">💾 Guardar Crédito</button>
+                    <button type="button" class="btn-secondary" onclick="closeModal('creditModal')">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Update Loan Return Modal -->
+    <div id="updateLoanReturnModal" class="modal">
+        <div class="modal-content">
+            <h2>📅 Actualizar Devolución</h2>
+            <form onsubmit="saveLoanReturn(event)" id="loanReturnForm">
+                <div class="form-group">
+                    <label>¿Se completó la devolución?</label>
+                    <select id="loanReturnStatus" onchange="updateReturnStatusFields()" required>
+                        <option value="pending">⏳ Pendiente</option>
+                        <option value="completed">✅ Completada</option>
+                        <option value="partial">⚠️ Parcial</option>
+                    </select>
+                </div>
+                <div id="partialReturnFields" style="display:none;">
+                    <div class="form-group">
+                        <label>Monto Devuelto</label>
+                        <input type="number" id="partialReturnAmount" step="0.01" placeholder="0.00">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Nueva Fecha de Devolución</label>
+                    <input type="date" id="newReturnDate">
+                </div>
+                <div class="form-group">
+                    <label>Notas</label>
+                    <textarea id="returnNotes" placeholder="Observaciones sobre la devolución..."></textarea>
+                </div>
+                <div class="button-group">
+                    <button type="submit" class="btn-primary">💾 Guardar Actualización</button>
+                    <button type="button" class="btn-secondary" onclick="closeModal('updateLoanReturnModal')">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- New Category Modal -->
+    <div id="newCategoryModal" class="modal">
+        <div class="modal-content">
+            <h2>➕ Nueva Categoría</h2>
+            <form onsubmit="saveNewCategory(event)">
+                <div class="form-group">
+                    <label>Ícono (Emoji)</label>
+                    <input type="text" id="categoryIcon" placeholder="Ej: 🎮 (copiar emoji)" maxlength="2" required>
+                </div>
+                <div class="form-group">
+                    <label>Nombre de la Categoría</label>
+                    <input type="text" id="categoryName" placeholder="Ej: Videojuegos" required>
+                </div>
+                <div class="button-group">
+                    <button type="submit" class="btn-primary">💾 Guardar Categoría</button>
+                    <button type="button" class="btn-secondary" onclick="closeModal('newCategoryModal')">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(err => console.log('SW error:', err));
+        }
+    </script>
+    <script src="app.js"></script>
+</body>
+</html>
