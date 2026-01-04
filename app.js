@@ -30,6 +30,15 @@ let incomeForecastChartInstance = null;
 let balanceForecastChartInstance = null;
 let editingLoanId = null;
 
+// FUNCIONES DE FORMATO
+function formatCLP(amount) {
+    return '$' + new Intl.NumberFormat('es-CL').format(Math.round(amount));
+}
+
+function parseCLP(amount) {
+    return parseInt(amount) || 0;
+}
+
 // INICIALIZACIÓN DE BASE DE DATOS
 function initDB() {
     return new Promise((resolve, reject) => {
@@ -70,6 +79,12 @@ function getMonthFromDate(date) {
     return `${year}-${month}`;
 }
 
+function addMonthsToDate(date, months) {
+    const result = new Date(date);
+    result.setMonth(result.getMonth() + months);
+    return result;
+}
+
 function updateMonthDisplay() {
     const monthName = MONTHS_LABELS[currentDate.getMonth()];
     document.getElementById('monthDisplay').textContent = `${monthName} ${currentDate.getFullYear()}`;
@@ -100,9 +115,6 @@ function switchSection(sectionId) {
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
     
-    event?.target?.classList.add('active');
-    document.querySelector(`.sidebar-nav button:nth-child(${getNavIndex(sectionId)})`).classList.add('active');
-    
     if (sectionId === 'expenses') loadExpenses();
     else if (sectionId === 'income') loadIncome();
     else if (sectionId === 'loans') {
@@ -125,11 +137,6 @@ function switchSection(sectionId) {
     else if (sectionId === 'dashboard') updateDashboard();
 }
 
-function getNavIndex(sectionId) {
-    const sections = ['dashboard', 'expenses', 'income', 'loans', 'credits', 'forecast', 'settings'];
-    return sections.indexOf(sectionId) + 1;
-}
-
 function switchForecastTab(tab) {
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
     document.getElementById(tab + 'Forecast').classList.add('active');
@@ -149,8 +156,9 @@ function openModal(modalId) {
     } else if (modalId === 'loanModal') {
         document.getElementById('loanDueDate').valueAsDate = new Date(new Date().getTime() + 30 * 24 * 60 * 60 * 1000);
         updateLoanTypeFields();
+        updateLoanPaymentType();
     } else if (modalId === 'creditModal') {
-        document.getElementById('creditStartDate').valueAsDate = new Date();
+        document.getElementById('creditFirstPaymentDate').valueAsDate = new Date();
         document.getElementById('creditDueDate').valueAsDate = new Date(new Date().getFullYear() + 1, new Date().getMonth(), new Date().getDate());
     }
 }
@@ -171,11 +179,21 @@ function updateIncomeForm() {
 
 function updateLoanTypeFields() {
     const type = document.getElementById('loanType').value;
-    const label = document.querySelector('h2');
+    const label = document.querySelector('#loanModal h2');
     if (type === 'egreso') {
         label.textContent = '📤 Nuevo Egreso (Dinero que presté)';
     } else {
         label.textContent = '📥 Nuevo Ingreso (Dinero que me prestaron)';
+    }
+}
+
+function updateLoanPaymentType() {
+    const type = document.getElementById('loanPaymentType').value;
+    const installmentsField = document.getElementById('installmentsField');
+    if (type === 'installments') {
+        installmentsField.style.display = 'block';
+    } else {
+        installmentsField.style.display = 'none';
     }
 }
 
@@ -187,6 +205,20 @@ function updateReturnStatusFields() {
     } else {
         partialFields.style.display = 'none';
     }
+}
+
+function calculateMonthlyPayment() {
+    const amount = parseCLP(document.getElementById('creditAmount').value);
+    const installments = parseInt(document.getElementById('creditInstallments').value) || 1;
+    const monthlyPayment = Math.round(amount / installments);
+    document.getElementById('creditMonthlyPayment').value = monthlyPayment;
+}
+
+function calculateInstallmentAmount() {
+    const amount = parseCLP(document.getElementById('loanAmount').value);
+    const installments = parseInt(document.getElementById('loanInstallments').value) || 1;
+    const installmentAmount = Math.round(amount / installments);
+    document.getElementById('loanInstallmentAmount').value = installmentAmount;
 }
 
 function loadCategoryDropdown(elementId) {
@@ -203,7 +235,7 @@ function saveExpense(event) {
     const date = document.getElementById('expenseDate').value;
     const category = document.getElementById('expenseCategory').value;
     const description = document.getElementById('expenseDescription').value;
-    const amount = parseFloat(document.getElementById('expenseAmount').value);
+    const amount = parseCLP(document.getElementById('expenseAmount').value);
     
     if (!date || !category || !description || !amount) {
         alert('Por favor completa todos los campos');
@@ -241,13 +273,15 @@ function loadExpenses() {
         }
         
         container.innerHTML = expenses.map(exp => `
-            <div class="transaction-item expense">
+            <div class="transaction-item">
                 <div class="transaction-info">
                     <h4>${CATEGORIES[exp.category]?.icon || '📌'} ${CATEGORIES[exp.category]?.label || 'Otra'}</h4>
                     <p>${exp.description} • ${new Date(exp.date).toLocaleDateString('es-CL')}</p>
                 </div>
-                <div class="transaction-amount expense">-$${exp.amount.toFixed(2)}</div>
-                <button onclick="deleteExpense(${exp.id})" class="btn-small btn-danger" style="margin-left: 10px;">🗑️</button>
+                <div style="text-align: right; display: flex; align-items: center; gap: 10px;">
+                    <span style="font-weight: bold; color: #f44336;">-${formatCLP(exp.amount)}</span>
+                    <button onclick="deleteExpense(${exp.id})" class="btn-small btn-danger">🗑️</button>
+                </div>
             </div>
         `).join('');
     };
@@ -271,7 +305,7 @@ function saveIncome(event) {
     const date = document.getElementById('incomeDate').value;
     const type = document.getElementById('incomeType').value;
     const description = document.getElementById('incomeDescription').value;
-    const amount = parseFloat(document.getElementById('incomeAmount').value);
+    const amount = parseCLP(document.getElementById('incomeAmount').value);
     
     if (!date || !type || !description || !amount) {
         alert('Por favor completa todos los campos');
@@ -314,13 +348,15 @@ function loadIncome() {
         }
         
         container.innerHTML = incomes.map(inc => `
-            <div class="transaction-item income">
+            <div class="transaction-item">
                 <div class="transaction-info">
                     <h4>${INCOME_TYPES[inc.type]?.icon || '📌'} ${INCOME_TYPES[inc.type]?.label || 'Otro'}</h4>
                     <p>${inc.description} • ${new Date(inc.date).toLocaleDateString('es-CL')}</p>
                 </div>
-                <div class="transaction-amount income">+$${inc.amount.toFixed(2)}</div>
-                <button onclick="deleteIncome(${inc.id})" class="btn-small btn-danger" style="margin-left: 10px;">🗑️</button>
+                <div style="text-align: right; display: flex; align-items: center; gap: 10px;">
+                    <span style="font-weight: bold; color: #4CAF50;">+${formatCLP(inc.amount)}</span>
+                    <button onclick="deleteIncome(${inc.id})" class="btn-small btn-danger">🗑️</button>
+                </div>
             </div>
         `).join('');
     };
@@ -338,12 +374,29 @@ function deleteIncome(id) {
     };
 }
 
-// PRÉSTAMOS AVANZADOS
+// PRÉSTAMOS CON CUOTAS
+function generatePaymentSchedule(amount, installments, startDate) {
+    const schedule = [];
+    const installmentAmount = Math.round(amount / installments);
+    
+    for (let i = 0; i < installments; i++) {
+        const paymentDate = addMonthsToDate(new Date(startDate), i);
+        schedule.push({
+            number: i + 1,
+            date: paymentDate.toISOString().split('T')[0],
+            amount: i === installments - 1 ? amount - (installmentAmount * (installments - 1)) : installmentAmount,
+            status: 'pending'
+        });
+    }
+    
+    return schedule;
+}
+
 function saveLoan(event) {
     event.preventDefault();
     const type = document.getElementById('loanType').value;
     const person = document.getElementById('loanPerson').value;
-    const amount = parseFloat(document.getElementById('loanAmount').value);
+    const amount = parseCLP(document.getElementById('loanAmount').value);
     const paymentType = document.getElementById('loanPaymentType').value;
     const dueDate = document.getElementById('loanDueDate').value;
     const description = document.getElementById('loanDescription').value;
@@ -353,12 +406,23 @@ function saveLoan(event) {
         return;
     }
     
+    let paymentSchedule = null;
+    if (paymentType === 'installments') {
+        const installments = parseInt(document.getElementById('loanInstallments').value);
+        if (!installments || installments < 2) {
+            alert('Ingresa un número válido de cuotas (mínimo 2)');
+            return;
+        }
+        paymentSchedule = generatePaymentSchedule(amount, installments, dueDate);
+    }
+    
     const loan = {
         type,
         person,
         amount,
         paymentType,
         dueDate,
+        paymentSchedule,
         description,
         status: 'pending',
         returnHistory: [],
@@ -390,8 +454,15 @@ function checkLoanDates() {
         const alerts = [];
         
         loans.forEach(loan => {
-            if (loan.status === 'pending' && loan.dueDate <= today) {
-                alerts.push(loan);
+            if (loan.status === 'pending') {
+                if (loan.paymentSchedule) {
+                    const overduePayments = loan.paymentSchedule.filter(p => p.date <= today && p.status === 'pending');
+                    if (overduePayments.length > 0) {
+                        alerts.push({ ...loan, overdueCount: overduePayments.length });
+                    }
+                } else if (loan.dueDate <= today) {
+                    alerts.push(loan);
+                }
             }
         });
         
@@ -399,8 +470,8 @@ function checkLoanDates() {
         if (alerts.length > 0) {
             alertContainer.innerHTML = alerts.map(loan => `
                 <div class="alert-box danger">
-                    <strong>⚠️ Préstamo Vencido:</strong> ${loan.person} - $${loan.amount.toFixed(2)}
-                    <br><small>Vencimiento: ${new Date(loan.dueDate).toLocaleDateString('es-CL')}</small>
+                    <strong>⚠️ Préstamo Vencido:</strong> ${loan.person} - ${formatCLP(loan.amount)}
+                    <br><small>Vencimiento: ${new Date(loan.dueDate).toLocaleDateString('es-CL')}${loan.overdueCount ? ` (${loan.overdueCount} cuota(s) vencida(s))` : ''}</small>
                     <br><button onclick="editLoanReturn(${loan.id})" class="btn-small btn-primary" style="margin-top: 8px;">📅 Actualizar Estado</button>
                 </div>
             `).join('');
@@ -419,7 +490,6 @@ function editLoanReturn(loanId) {
     request.onsuccess = () => {
         const loan = request.result;
         document.getElementById('loanReturnStatus').value = loan.status;
-        document.getElementById('loanReturnStatus').dataset.loanId = loanId;
         updateReturnStatusFields();
         openModal('updateLoanReturnModal');
     };
@@ -432,7 +502,7 @@ function saveLoanReturn(event) {
     const status = document.getElementById('loanReturnStatus').value;
     const newDate = document.getElementById('newReturnDate').value;
     const notes = document.getElementById('returnNotes').value;
-    const partialAmount = status === 'partial' ? parseFloat(document.getElementById('partialReturnAmount').value) : 0;
+    const partialAmount = status === 'partial' ? parseCLP(document.getElementById('partialReturnAmount').value) : 0;
     
     const transaction = db.transaction(['loans'], 'readwrite');
     const store = transaction.objectStore('loans');
@@ -484,17 +554,40 @@ function loadLoans() {
             const today = new Date();
             const isOverdue = dueDate < today && loan.status === 'pending';
             
+            let scheduleHTML = '';
+            if (loan.paymentSchedule && loan.paymentSchedule.length > 0) {
+                scheduleHTML = `
+                    <div class="payment-schedule">
+                        <h4>📅 Calendario de Cuotas:</h4>
+                        ${loan.paymentSchedule.map(payment => {
+                            const payDate = new Date(payment.date);
+                            const isPaid = payment.status === 'paid';
+                            const isOverduePayment = payDate < today && payment.status === 'pending';
+                            return `
+                                <div class="payment-row ${isPaid ? 'paid' : ''} ${isOverduePayment ? 'overdue' : ''}">
+                                    <strong>Cuota ${payment.number}</strong>
+                                    <span>${payDate.toLocaleDateString('es-CL')}</span>
+                                    <span>${formatCLP(payment.amount)}</span>
+                                    <span>${payment.status === 'paid' ? '✅' : isOverduePayment ? '❌' : '⏳'}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            }
+            
             return `
                 <div class="transaction-item" style="border-left-color: ${isOverdue ? '#f44336' : '#ff9800'};">
                     <div class="transaction-info">
                         <h4>${typeIcon} ${loan.person} - ${typeLabel}</h4>
-                        <p>${loan.paymentType === 'single' ? '💵 Pago Único' : '📅 Cuotas'} • ${new Date(loan.createdDate).toLocaleDateString('es-CL')}</p>
+                        <p>${loan.paymentType === 'single' ? '💵 Pago Único' : `📅 ${loan.paymentSchedule.length} Cuotas`} • ${new Date(loan.createdDate).toLocaleDateString('es-CL')}</p>
                         <p style="color: ${isOverdue ? '#f44336' : '#666'}; font-weight: 500;">Vence: ${dueDate.toLocaleDateString('es-CL')} ${statusIcon}</p>
                         ${loan.description ? `<p style="font-size: 12px; color: #999;">📝 ${loan.description}</p>` : ''}
+                        ${scheduleHTML}
                     </div>
                     <div style="text-align: right;">
-                        <div class="transaction-amount" style="color: #ff9800;">$${loan.amount.toFixed(2)}</div>
-                        <button onclick="editLoanReturn(${loan.id})" class="btn-small btn-primary" style="margin-top: 8px; margin-right: 5px;">📅 Actualizar</button>
+                        <div style="font-weight: bold; color: #ff9800; margin-bottom: 8px;">${formatCLP(loan.amount)}</div>
+                        <button onclick="editLoanReturn(${loan.id})" class="btn-small btn-primary" style="margin-right: 5px;">📅 Actualizar</button>
                         <button onclick="deleteLoan(${loan.id})" class="btn-small btn-danger">🗑️</button>
                     </div>
                 </div>
@@ -515,33 +608,46 @@ function deleteLoan(id) {
     };
 }
 
-// CRÉDITOS
+// CRÉDITOS MEJORADOS
 function saveCredit(event) {
     event.preventDefault();
     const description = document.getElementById('creditDescription').value;
-    const amount = parseFloat(document.getElementById('creditAmount').value);
-    const paid = parseFloat(document.getElementById('creditPaid').value);
+    const amount = parseCLP(document.getElementById('creditAmount').value);
+    const installments = parseInt(document.getElementById('creditInstallments').value);
+    const monthlyPayment = parseCLP(document.getElementById('creditMonthlyPayment').value);
+    const paid = parseCLP(document.getElementById('creditPaid').value);
     const rate = parseFloat(document.getElementById('creditRate').value) || 0;
-    const startDate = document.getElementById('creditStartDate').value;
+    const firstPaymentDate = document.getElementById('creditFirstPaymentDate').value;
     const dueDate = document.getElementById('creditDueDate').value;
-    const installments = parseInt(document.getElementById('creditInstallments').value) || 12;
     
-    if (!description || !amount || !startDate || !dueDate) {
+    if (!description || !amount || !installments || !monthlyPayment || !firstPaymentDate || !dueDate) {
         alert('Por favor completa todos los campos requeridos');
         return;
+    }
+    
+    // Generar cronograma de pagos
+    const paymentSchedule = [];
+    for (let i = 0; i < installments; i++) {
+        const paymentDate = addMonthsToDate(new Date(firstPaymentDate), i);
+        paymentSchedule.push({
+            number: i + 1,
+            date: paymentDate.toISOString().split('T')[0],
+            amount: monthlyPayment,
+            status: 'pending'
+        });
     }
     
     const credit = {
         description,
         amount,
-        paid,
-        remaining: amount - paid,
-        rate,
-        startDate,
-        dueDate,
         installments,
-        paidInstallments: Math.round((paid / amount) * installments),
-        status: 'active',
+        monthlyPayment,
+        paid,
+        rate,
+        firstPaymentDate,
+        dueDate,
+        paymentSchedule,
+        status: paid >= amount ? 'completed' : 'active',
         timestamp: new Date().getTime()
     };
     
@@ -569,7 +675,7 @@ function checkCreditDates() {
         const alerts = [];
         
         credits.forEach(credit => {
-            if (credit.status === 'active' && credit.dueDate <= today && credit.remaining > 0) {
+            if (credit.status === 'active' && credit.dueDate <= today && credit.paid < credit.amount) {
                 alerts.push(credit);
             }
         });
@@ -579,7 +685,7 @@ function checkCreditDates() {
             alertContainer.innerHTML = alerts.map(credit => `
                 <div class="alert-box danger">
                     <strong>⚠️ Crédito Vencido:</strong> ${credit.description}
-                    <br><small>Pendiente: $${credit.remaining.toFixed(2)} • Vence: ${new Date(credit.dueDate).toLocaleDateString('es-CL')}</small>
+                    <br><small>Pendiente: ${formatCLP(credit.amount - credit.paid)} • Vence: ${new Date(credit.dueDate).toLocaleDateString('es-CL')}</small>
                 </div>
             `).join('');
         } else {
@@ -605,24 +711,47 @@ function loadCredits() {
         container.innerHTML = credits.map(credit => {
             const percentage = (credit.paid / credit.amount) * 100;
             const daysRemaining = Math.ceil((new Date(credit.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
+            const today = new Date().toISOString().split('T')[0];
+            
+            let scheduleHTML = '';
+            if (credit.paymentSchedule && credit.paymentSchedule.length > 0) {
+                scheduleHTML = `
+                    <div class="payment-schedule">
+                        <h4>📅 Cronograma de Cuotas:</h4>
+                        ${credit.paymentSchedule.slice(0, 5).map(payment => {
+                            const isOverdue = payment.date <= today && payment.status === 'pending';
+                            return `
+                                <div class="payment-row ${isOverdue ? 'overdue' : ''}">
+                                    <strong>Cuota ${payment.number}</strong>
+                                    <span>${new Date(payment.date).toLocaleDateString('es-CL')}</span>
+                                    <span>${formatCLP(payment.amount)}</span>
+                                    <span>${isOverdue ? '❌' : '⏳'}</span>
+                                </div>
+                            `;
+                        }).join('')}
+                        ${credit.paymentSchedule.length > 5 ? `<p style="font-size: 12px; color: #999; margin-top: 5px;">... y ${credit.paymentSchedule.length - 5} cuota(s) más</p>` : ''}
+                    </div>
+                `;
+            }
             
             return `
                 <div class="transaction-item">
                     <div class="transaction-info">
                         <h4>💳 ${credit.description}</h4>
-                        <p>${credit.paidInstallments}/${credit.installments} cuotas • Tasa: ${credit.rate}%</p>
+                        <p>${credit.installments} cuotas de ${formatCLP(credit.monthlyPayment)} • ${credit.rate > 0 ? `Tasa: ${credit.rate}%` : 'Sin interés'}</p>
                         <div style="margin-top: 8px;">
                             <div style="background: #eee; height: 8px; border-radius: 4px; overflow: hidden;">
                                 <div style="background: ${percentage < 100 ? '#2196F3' : '#4CAF50'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
                             </div>
-                            <p style="font-size: 11px; margin-top: 4px; color: #666;">Pagado: $${credit.paid.toFixed(2)} / $${credit.amount.toFixed(2)} (${percentage.toFixed(1)}%)</p>
+                            <p style="font-size: 11px; margin-top: 4px; color: #666;">Pagado: ${formatCLP(credit.paid)} / ${formatCLP(credit.amount)} (${percentage.toFixed(1)}%)</p>
                         </div>
                         <p style="font-size: 12px; color: ${daysRemaining < 30 ? '#f44336' : '#999'}; margin-top: 4px;">
                             ${daysRemaining > 0 ? `Vence en ${daysRemaining} días` : '⚠️ Vencido'}
                         </p>
+                        ${scheduleHTML}
                     </div>
-                    <div style="display: flex; gap: 5px; flex-direction: column; align-items: flex-end;">
-                        <div class="transaction-amount" style="color: #2196F3;">$${credit.remaining.toFixed(2)}</div>
+                    <div style="text-align: right;">
+                        <div style="font-weight: bold; color: #2196F3; margin-bottom: 8px;">${formatCLP(credit.amount - credit.paid)}</div>
                         <button onclick="deleteCredit(${credit.id})" class="btn-small btn-danger">🗑️</button>
                     </div>
                 </div>
@@ -691,10 +820,10 @@ function updateDashboard() {
             return sum;
         }, 0);
         
-        document.getElementById('totalExpenses').textContent = '$' + totalExpenses.toFixed(2);
-        document.getElementById('totalIncome').textContent = '$' + totalIncome.toFixed(2);
-        document.getElementById('balance').textContent = '$' + balance.toFixed(2);
-        document.getElementById('toReturn').textContent = '$' + toReturn.toFixed(2);
+        document.getElementById('totalExpenses').textContent = formatCLP(totalExpenses);
+        document.getElementById('totalIncome').textContent = formatCLP(totalIncome);
+        document.getElementById('balance').textContent = formatCLP(balance);
+        document.getElementById('toReturn').textContent = formatCLP(toReturn);
         
         updateRecentTransactions(expenses, incomes);
         drawCategoryChart(expenses);
@@ -721,22 +850,22 @@ function updateRecentTransactions(expenses, incomes) {
     container.innerHTML = recent.map(t => {
         if (t.type === 'expense') {
             return `
-                <div class="transaction-item expense">
+                <div class="transaction-item">
                     <div class="transaction-info">
                         <h4>${CATEGORIES[t.category]?.icon || '📌'} ${CATEGORIES[t.category]?.label || 'Otra'}</h4>
                         <p>${t.description} • ${new Date(t.date).toLocaleDateString('es-CL')}</p>
                     </div>
-                    <div class="transaction-amount expense">-$${t.amount.toFixed(2)}</div>
+                    <div style="font-weight: bold; color: #f44336;">-${formatCLP(t.amount)}</div>
                 </div>
             `;
         } else {
             return `
-                <div class="transaction-item income">
+                <div class="transaction-item">
                     <div class="transaction-info">
                         <h4>${INCOME_TYPES[t.type]?.icon || '📌'} ${INCOME_TYPES[t.type]?.label || 'Otro'}</h4>
                         <p>${t.description} • ${new Date(t.date).toLocaleDateString('es-CL')}</p>
                     </div>
-                    <div class="transaction-amount income">+$${t.amount.toFixed(2)}</div>
+                    <div style="font-weight: bold; color: #4CAF50;">+${formatCLP(t.amount)}</div>
                 </div>
             `;
         }
@@ -788,7 +917,7 @@ function drawIncomeVsExpenseChart(income, expenses) {
         data: {
             labels: ['Ingresos', 'Gastos'],
             datasets: [{
-                label: 'Monto',
+                label: 'Monto CLP',
                 data: [income, expenses],
                 backgroundColor: ['#4CAF50', '#f44336']
             }]
@@ -855,11 +984,11 @@ function generateForecastSummary(allExpenses, allIncomes) {
 function updateForecastSummary(data) {
     const container = document.getElementById('forecastSummary');
     container.innerHTML = data.map(d => `
-        <div class="forecast-card">
-            <h4>${MONTHS_LABELS[d.month.getMonth()]} ${d.month.getFullYear()}</h4>
+        <div class="summary-card">
+            <h3>${MONTHS_LABELS[d.month.getMonth()]} ${d.month.getFullYear()}</h3>
             <p style="font-size: 12px; color: rgba(255,255,255,0.9);">Ingresos</p>
-            <div class="amount">$${d.income.toFixed(0)}</div>
-            <p style="font-size: 12px; color: rgba(255,255,255,0.9); margin-top: 8px;">Gastos: $${d.expenses.toFixed(0)}</p>
+            <div class="amount">${formatCLP(d.income)}</div>
+            <p style="font-size: 12px; color: rgba(255,255,255,0.9); margin-top: 8px;">Gastos: ${formatCLP(d.expenses)}</p>
         </div>
     `).join('');
 }
@@ -1074,7 +1203,7 @@ function exportData() {
         credits = creditsRequest.result;
         
         const data = {
-            version: '4.1.0',
+            version: '4.2.0',
             timestamp: new Date().toISOString(),
             categories: CATEGORIES,
             expenses: expenses,
