@@ -23,12 +23,8 @@ const MONTHS_LABELS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'J
 
 let currentDate = new Date();
 let db;
-let categoryChartInstance = null;
-let incomeVsExpenseChartInstance = null;
-let expensesForecastChartInstance = null;
-let incomeForecastChartInstance = null;
+let budgetVsActualChartInstance = null;
 let balanceForecastChartInstance = null;
-let editingLoanId = null;
 
 // FUNCIONES DE FORMATO
 function formatCLP(amount) {
@@ -42,7 +38,7 @@ function parseCLP(amount) {
 // INICIALIZACIÓN DE BASE DE DATOS
 function initDB() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open('FinanzasDB', 4);
+        const request = indexedDB.open('FinanzasDB', 5);
         request.onerror = () => reject(request.error);
         request.onsuccess = () => {
             db = request.result;
@@ -61,6 +57,9 @@ function initDB() {
             }
             if (!dbInstance.objectStoreNames.contains('credits')) {
                 dbInstance.createObjectStore('credits', { keyPath: 'id', autoIncrement: true });
+            }
+            if (!dbInstance.objectStoreNames.contains('budgets')) {
+                dbInstance.createObjectStore('budgets', { keyPath: 'id', autoIncrement: true });
             }
         };
     });
@@ -113,53 +112,39 @@ function switchSection(sectionId) {
     document.getElementById(sectionId).classList.add('active');
     
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
     
-    if (sectionId === 'expenses') loadExpenses();
-    else if (sectionId === 'income') loadIncome();
-    else if (sectionId === 'loans') {
+    if (sectionId === 'budget') {
+        loadBudgetSection();
+    } else if (sectionId === 'expenses') {
+        loadExpenses();
+    } else if (sectionId === 'income') {
+        loadIncome();
+    } else if (sectionId === 'loans') {
         loadLoans();
-        checkLoanDates();
-    }
-    else if (sectionId === 'credits') {
+    } else if (sectionId === 'credits') {
         loadCredits();
-        checkCreditDates();
-    }
-    else if (sectionId === 'forecast') {
+    } else if (sectionId === 'forecast') {
         loadForecastData();
-        setTimeout(() => {
-            drawExpensesForecast();
-            drawIncomeForecast();
-            drawBalanceForecast();
-        }, 100);
+        setTimeout(() => drawBalanceForecast(), 100);
+    } else if (sectionId === 'dashboard') {
+        updateDashboard();
     }
-    else if (sectionId === 'settings') renderCategories();
-    else if (sectionId === 'dashboard') updateDashboard();
-}
-
-function switchForecastTab(tab) {
-    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-    document.getElementById(tab + 'Forecast').classList.add('active');
-    
-    document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
-    event.target.classList.add('active');
 }
 
 function openModal(modalId) {
     document.getElementById(modalId).classList.add('active');
-    if (modalId === 'expenseModal') {
+    if (modalId === 'budgetModal') {
+        renderBudgetForm();
+    } else if (modalId === 'expenseModal') {
         document.getElementById('expenseDate').valueAsDate = new Date();
         loadCategoryDropdown('expenseCategory');
     } else if (modalId === 'incomeModal') {
         document.getElementById('incomeDate').valueAsDate = new Date();
         updateIncomeForm();
     } else if (modalId === 'loanModal') {
-        document.getElementById('loanDueDate').valueAsDate = new Date(new Date().getTime() + 30 * 24 * 60 * 60 * 1000);
-        updateLoanTypeFields();
-        updateLoanPaymentType();
+        document.getElementById('loanDueDate').valueAsDate = new Date();
     } else if (modalId === 'creditModal') {
-        document.getElementById('creditFirstPaymentDate').valueAsDate = new Date();
-        document.getElementById('creditDueDate').valueAsDate = new Date(new Date().getFullYear() + 1, new Date().getMonth(), new Date().getDate());
+        document.getElementById('creditMonthlyPayment').valueAsDate = new Date();
     }
 }
 
@@ -177,50 +162,6 @@ function updateIncomeForm() {
     }
 }
 
-function updateLoanTypeFields() {
-    const type = document.getElementById('loanType').value;
-    const label = document.querySelector('#loanModal h2');
-    if (type === 'egreso') {
-        label.textContent = '📤 Nuevo Egreso (Dinero que presté)';
-    } else {
-        label.textContent = '📥 Nuevo Ingreso (Dinero que me prestaron)';
-    }
-}
-
-function updateLoanPaymentType() {
-    const type = document.getElementById('loanPaymentType').value;
-    const installmentsField = document.getElementById('installmentsField');
-    if (type === 'installments') {
-        installmentsField.style.display = 'block';
-    } else {
-        installmentsField.style.display = 'none';
-    }
-}
-
-function updateReturnStatusFields() {
-    const status = document.getElementById('loanReturnStatus').value;
-    const partialFields = document.getElementById('partialReturnFields');
-    if (status === 'partial') {
-        partialFields.style.display = 'block';
-    } else {
-        partialFields.style.display = 'none';
-    }
-}
-
-function calculateMonthlyPayment() {
-    const amount = parseCLP(document.getElementById('creditAmount').value);
-    const installments = parseInt(document.getElementById('creditInstallments').value) || 1;
-    const monthlyPayment = Math.round(amount / installments);
-    document.getElementById('creditMonthlyPayment').value = monthlyPayment;
-}
-
-function calculateInstallmentAmount() {
-    const amount = parseCLP(document.getElementById('loanAmount').value);
-    const installments = parseInt(document.getElementById('loanInstallments').value) || 1;
-    const installmentAmount = Math.round(amount / installments);
-    document.getElementById('loanInstallmentAmount').value = installmentAmount;
-}
-
 function loadCategoryDropdown(elementId) {
     const select = document.getElementById(elementId);
     select.innerHTML = '<option value="">Selecciona una categoría</option>';
@@ -229,7 +170,273 @@ function loadCategoryDropdown(elementId) {
     }
 }
 
-// GASTOS
+// PRESUPUESTO
+function renderBudgetForm() {
+    const container = document.getElementById('budgetInputs');
+    let html = '';
+    
+    for (const [key, cat] of Object.entries(CATEGORIES)) {
+        const inputId = `budget_${key}`;
+        html += `
+            <div class="budget-input-row">
+                <div class="budget-input-label">${cat.icon} ${cat.label}</div>
+                <div class="budget-input-field">
+                    <input type="number" id="${inputId}" step="1" placeholder="0" value="0">
+                    <span style="color: #999; padding: 8px; font-size: 12px;">CLP</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+    
+    // Cargar valores actuales si existen
+    const transaction = db.transaction(['budgets'], 'readonly');
+    const store = transaction.objectStore('budgets');
+    const request = store.getAll();
+    
+    request.onsuccess = () => {
+        const budgets = request.result;
+        const currentMonthBudget = budgets.find(b => b.month === getCurrentMonth());
+        
+        if (currentMonthBudget) {
+            for (const [key, value] of Object.entries(currentMonthBudget.categories || {})) {
+                const inputElement = document.getElementById(`budget_${key}`);
+                if (inputElement) {
+                    inputElement.value = value;
+                }
+            }
+        }
+    };
+}
+
+function saveBudget(event) {
+    event.preventDefault();
+    
+    const categories = {};
+    let totalBudget = 0;
+    
+    for (const [key] of Object.entries(CATEGORIES)) {
+        const value = parseCLP(document.getElementById(`budget_${key}`).value);
+        categories[key] = value;
+        totalBudget += value;
+    }
+    
+    // Obtener ingreso promedio de últimos 3 meses
+    const transaction = db.transaction(['income'], 'readonly');
+    const store = transaction.objectStore('income');
+    const request = store.getAll();
+    
+    request.onsuccess = () => {
+        const incomes = request.result;
+        const last3Months = [];
+        const today = new Date();
+        
+        for (let i = 0; i < 3; i++) {
+            const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+            last3Months.push(getMonthFromDate(date));
+        }
+        
+        const last3MonthsIncome = incomes.filter(i => last3Months.includes(i.date.substring(0, 7)));
+        const avgIncome = last3MonthsIncome.length > 0 
+            ? last3MonthsIncome.reduce((sum, i) => sum + i.amount, 0) / 3
+            : 0;
+        
+        if (totalBudget > avgIncome && avgIncome > 0) {
+            alert(`⚠️ ADVERTENCIA: Tu presupuesto total ($${formatCLP(totalBudget)}) excede tu ingreso promedio de los últimos 3 meses ($${formatCLP(avgIncome)}). Considera ajustar los montos.`);
+        }
+        
+        const budget = {
+            month: getCurrentMonth(),
+            categories: categories,
+            timestamp: new Date().getTime()
+        };
+        
+        const budgetTransaction = db.transaction(['budgets'], 'readwrite');
+        const budgetStore = budgetTransaction.objectStore('budgets');
+        
+        // Buscar si ya existe presupuesto para este mes
+        const checkRequest = budgetStore.getAll();
+        checkRequest.onsuccess = () => {
+            const existing = checkRequest.result.find(b => b.month === getCurrentMonth());
+            
+            if (existing) {
+                budget.id = existing.id;
+                budgetStore.put(budget);
+            } else {
+                budgetStore.add(budget);
+            }
+            
+            budgetTransaction.oncomplete = () => {
+                alert('Presupuesto guardado exitosamente');
+                closeModal('budgetModal');
+                loadBudgetSection();
+                updateDashboard();
+            };
+        };
+    };
+}
+
+function loadBudgetSection() {
+    const transaction = db.transaction(['budgets'], 'readonly');
+    const store = transaction.objectStore('budgets');
+    const request = store.getAll();
+    
+    request.onsuccess = () => {
+        const budgets = request.result;
+        const currentMonthBudget = budgets.find(b => b.month === getCurrentMonth());
+        
+        if (!currentMonthBudget) {
+            document.getElementById('budgetList').innerHTML = `
+                <div class="alert-box info">
+                    <strong>📊 Sin Presupuesto Planificado</strong>
+                    <p>No tienes presupuesto asignado para ${MONTHS_LABELS[currentDate.getMonth()]} ${currentDate.getFullYear()}.</p>
+                    <p style="margin-top: 10px;">Haz clic en el botón "Planificar Presupuesto" para empezar.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        renderBudgetComparison(currentMonthBudget);
+    };
+}
+
+function renderBudgetComparison(budget) {
+    const currentMonth = getCurrentMonth();
+    const transaction = db.transaction(['expenses', 'credits'], 'readonly');
+    const expenseStore = transaction.objectStore('expenses');
+    const creditStore = transaction.objectStore('credits');
+    
+    const expensesRequest = expenseStore.getAll();
+    const creditsRequest = creditStore.getAll();
+    
+    let expenses = [];
+    let credits = [];
+    
+    expensesRequest.onsuccess = () => {
+        expenses = expensesRequest.result.filter(e => e.date.startsWith(currentMonth));
+    };
+    
+    creditsRequest.onsuccess = () => {
+        credits = creditsRequest.result;
+        
+        let html = '';
+        let totalSpent = 0;
+        let totalBudget = 0;
+        
+        for (const [key, cat] of Object.entries(CATEGORIES)) {
+            const budgetAmount = budget.categories[key] || 0;
+            const spent = expenses.filter(e => e.category === key).reduce((sum, e) => sum + e.amount, 0);
+            const percentage = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
+            const remaining = budgetAmount - spent;
+            
+            let progressClass = '';
+            let statusIcon = '';
+            
+            if (budgetAmount === 0) {
+                statusIcon = '⚪';
+            } else if (percentage >= 100) {
+                statusIcon = '❌';
+                progressClass = 'danger';
+            } else if (percentage >= 80) {
+                statusIcon = '⚠️';
+                progressClass = 'warning';
+            } else {
+                statusIcon = '✅';
+            }
+            
+            totalSpent += spent;
+            totalBudget += budgetAmount;
+            
+            html += `
+                <div class="budget-card">
+                    <div class="budget-header">
+                        <h4>${cat.icon} ${cat.label} ${statusIcon}</h4>
+                        <div class="amount">${formatCLP(spent)} / ${formatCLP(budgetAmount)}</div>
+                    </div>
+                    <div class="budget-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill ${progressClass}" style="width: ${Math.min(percentage, 100)}%"></div>
+                        </div>
+                        <div class="progress-text">
+                            <span>${percentage.toFixed(1)}%</span>
+                            <span>${budgetAmount > 0 ? (remaining >= 0 ? '✅ ' : '❌ ') + formatCLP(Math.abs(remaining)) + ' ' + (remaining >= 0 ? 'disponible' : 'excedido') : 'Sin presupuesto'}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Agregar créditos como "Pagos Recurrentes"
+        const monthlyCredit = credits.reduce((sum, c) => sum + c.monthlyPayment, 0);
+        if (monthlyCredit > 0) {
+            html += `
+                <div class="budget-card" style="border-left: 4px solid #2196F3;">
+                    <div class="budget-header">
+                        <h4>💳 Pagos Recurrentes (Créditos/Préstamos)</h4>
+                        <div class="amount">${formatCLP(monthlyCredit)}</div>
+                    </div>
+                    <p style="font-size: 12px; color: #666; margin: 0;">Cuotas mensuales comprometidas</p>
+                </div>
+            `;
+            totalSpent += monthlyCredit;
+        }
+        
+        document.getElementById('budgetList').innerHTML = `
+            <div class="budget-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; margin-bottom: 20px;">
+                <div class="budget-header">
+                    <h4 style="color: white;">📊 Resumen del Presupuesto</h4>
+                </div>
+                <div style="margin: 15px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div>
+                        <p style="color: rgba(255,255,255,0.9); font-size: 12px; margin: 0;">Presupuesto Total</p>
+                        <p style="color: white; font-size: 20px; font-weight: bold; margin: 5px 0;">${formatCLP(totalBudget)}</p>
+                    </div>
+                    <div>
+                        <p style="color: rgba(255,255,255,0.9); font-size: 12px; margin: 0;">Gastado</p>
+                        <p style="color: white; font-size: 20px; font-weight: bold; margin: 5px 0;">${formatCLP(totalSpent)}</p>
+                    </div>
+                </div>
+                <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 4px; text-align: center;">
+                    <p style="color: white; margin: 0;">Disponible: <strong>${formatCLP(totalBudget - totalSpent)}</strong></p>
+                </div>
+            </div>
+            ${html}
+        `;
+    };
+}
+
+// GASTOS CON VALIDACIÓN DE PRESUPUESTO
+function checkBudgetWarning() {
+    const category = document.getElementById('expenseCategory').value;
+    const warningDiv = document.getElementById('expenseWarning');
+    
+    if (!category) {
+        warningDiv.innerHTML = '';
+        return;
+    }
+    
+    const transaction = db.transaction(['budgets'], 'readonly');
+    const store = transaction.objectStore('budgets');
+    const request = store.getAll();
+    
+    request.onsuccess = () => {
+        const budgets = request.result;
+        const currentMonthBudget = budgets.find(b => b.month === getCurrentMonth());
+        
+        if (!currentMonthBudget || !currentMonthBudget.categories[category] || currentMonthBudget.categories[category] === 0) {
+            warningDiv.innerHTML = `
+                <div class="alert-box">
+                    <strong>⚠️ Sin Presupuesto</strong>
+                    <p>Esta categoría no tiene presupuesto asignado. Puedes registrar el gasto igual, pero se registrará sin límite presupuestario.</p>
+                </div>
+            `;
+        } else {
+            warningDiv.innerHTML = '';
+        }
+    };
+}
+
 function saveExpense(event) {
     event.preventDefault();
     const date = document.getElementById('expenseDate').value;
@@ -273,15 +480,13 @@ function loadExpenses() {
         }
         
         container.innerHTML = expenses.map(exp => `
-            <div class="transaction-item">
-                <div class="transaction-info">
+            <div class="budget-card">
+                <div class="budget-header">
                     <h4>${CATEGORIES[exp.category]?.icon || '📌'} ${CATEGORIES[exp.category]?.label || 'Otra'}</h4>
-                    <p>${exp.description} • ${new Date(exp.date).toLocaleDateString('es-CL')}</p>
+                    <div class="amount" style="color: #f44336;">-${formatCLP(exp.amount)}</div>
                 </div>
-                <div style="text-align: right; display: flex; align-items: center; gap: 10px;">
-                    <span style="font-weight: bold; color: #f44336;">-${formatCLP(exp.amount)}</span>
-                    <button onclick="deleteExpense(${exp.id})" class="btn-small btn-danger">🗑️</button>
-                </div>
+                <p style="margin: 0; font-size: 12px; color: #666;">${exp.description} • ${new Date(exp.date).toLocaleDateString('es-CL')}</p>
+                <button onclick="deleteExpense(${exp.id})" class="btn-small btn-danger" style="margin-top: 10px;">🗑️ Eliminar</button>
             </div>
         `).join('');
     };
@@ -348,15 +553,13 @@ function loadIncome() {
         }
         
         container.innerHTML = incomes.map(inc => `
-            <div class="transaction-item">
-                <div class="transaction-info">
+            <div class="budget-card">
+                <div class="budget-header">
                     <h4>${INCOME_TYPES[inc.type]?.icon || '📌'} ${INCOME_TYPES[inc.type]?.label || 'Otro'}</h4>
-                    <p>${inc.description} • ${new Date(inc.date).toLocaleDateString('es-CL')}</p>
+                    <div class="amount" style="color: #4CAF50;">+${formatCLP(inc.amount)}</div>
                 </div>
-                <div style="text-align: right; display: flex; align-items: center; gap: 10px;">
-                    <span style="font-weight: bold; color: #4CAF50;">+${formatCLP(inc.amount)}</span>
-                    <button onclick="deleteIncome(${inc.id})" class="btn-small btn-danger">🗑️</button>
-                </div>
+                <p style="margin: 0; font-size: 12px; color: #666;">${inc.description} • ${new Date(inc.date).toLocaleDateString('es-CL')}</p>
+                <button onclick="deleteIncome(${inc.id})" class="btn-small btn-danger" style="margin-top: 10px;">🗑️ Eliminar</button>
             </div>
         `).join('');
     };
@@ -374,560 +577,181 @@ function deleteIncome(id) {
     };
 }
 
-// PRÉSTAMOS CON CUOTAS
-function generatePaymentSchedule(amount, installments, startDate) {
-    const schedule = [];
-    const installmentAmount = Math.round(amount / installments);
-    
-    for (let i = 0; i < installments; i++) {
-        const paymentDate = addMonthsToDate(new Date(startDate), i);
-        schedule.push({
-            number: i + 1,
-            date: paymentDate.toISOString().split('T')[0],
-            amount: i === installments - 1 ? amount - (installmentAmount * (installments - 1)) : installmentAmount,
-            status: 'pending'
-        });
-    }
-    
-    return schedule;
-}
-
+// LOANS y CREDITS (funciones básicas)
 function saveLoan(event) {
     event.preventDefault();
-    const type = document.getElementById('loanType').value;
-    const person = document.getElementById('loanPerson').value;
-    const amount = parseCLP(document.getElementById('loanAmount').value);
-    const paymentType = document.getElementById('loanPaymentType').value;
-    const dueDate = document.getElementById('loanDueDate').value;
-    const description = document.getElementById('loanDescription').value;
-    
-    if (!type || !person || !amount || !dueDate) {
-        alert('Por favor completa todos los campos requeridos');
-        return;
-    }
-    
-    let paymentSchedule = null;
-    if (paymentType === 'installments') {
-        const installments = parseInt(document.getElementById('loanInstallments').value);
-        if (!installments || installments < 2) {
-            alert('Ingresa un número válido de cuotas (mínimo 2)');
-            return;
-        }
-        paymentSchedule = generatePaymentSchedule(amount, installments, dueDate);
-    }
-    
     const loan = {
-        type,
-        person,
-        amount,
-        paymentType,
-        dueDate,
-        paymentSchedule,
-        description,
-        status: 'pending',
-        returnHistory: [],
-        timestamp: new Date().getTime(),
-        createdDate: new Date().toISOString().split('T')[0]
+        type: document.getElementById('loanType').value,
+        person: document.getElementById('loanPerson').value,
+        amount: parseCLP(document.getElementById('loanAmount').value),
+        dueDate: document.getElementById('loanDueDate').value,
+        timestamp: new Date().getTime()
     };
     
     const transaction = db.transaction(['loans'], 'readwrite');
-    const store = transaction.objectStore('loans');
-    store.add(loan);
-    
+    transaction.objectStore('loans').add(loan);
     transaction.oncomplete = () => {
-        alert('Préstamo guardado exitosamente');
+        alert('Préstamo guardado');
         closeModal('loanModal');
-        document.getElementById('loanModal').querySelector('form').reset();
         loadLoans();
         updateDashboard();
-    };
-}
-
-function checkLoanDates() {
-    const transaction = db.transaction(['loans'], 'readonly');
-    const store = transaction.objectStore('loans');
-    const request = store.getAll();
-    
-    request.onsuccess = () => {
-        const loans = request.result;
-        const today = new Date().toISOString().split('T')[0];
-        const alerts = [];
-        
-        loans.forEach(loan => {
-            if (loan.status === 'pending') {
-                if (loan.paymentSchedule) {
-                    const overduePayments = loan.paymentSchedule.filter(p => p.date <= today && p.status === 'pending');
-                    if (overduePayments.length > 0) {
-                        alerts.push({ ...loan, overdueCount: overduePayments.length });
-                    }
-                } else if (loan.dueDate <= today) {
-                    alerts.push(loan);
-                }
-            }
-        });
-        
-        const alertContainer = document.getElementById('loansAlerts');
-        if (alerts.length > 0) {
-            alertContainer.innerHTML = alerts.map(loan => `
-                <div class="alert-box danger">
-                    <strong>⚠️ Préstamo Vencido:</strong> ${loan.person} - ${formatCLP(loan.amount)}
-                    <br><small>Vencimiento: ${new Date(loan.dueDate).toLocaleDateString('es-CL')}${loan.overdueCount ? ` (${loan.overdueCount} cuota(s) vencida(s))` : ''}</small>
-                    <br><button onclick="editLoanReturn(${loan.id})" class="btn-small btn-primary" style="margin-top: 8px;">📅 Actualizar Estado</button>
-                </div>
-            `).join('');
-        } else {
-            alertContainer.innerHTML = '';
-        }
-    };
-}
-
-function editLoanReturn(loanId) {
-    editingLoanId = loanId;
-    const transaction = db.transaction(['loans'], 'readonly');
-    const store = transaction.objectStore('loans');
-    const request = store.get(loanId);
-    
-    request.onsuccess = () => {
-        const loan = request.result;
-        document.getElementById('loanReturnStatus').value = loan.status;
-        updateReturnStatusFields();
-        openModal('updateLoanReturnModal');
-    };
-}
-
-function saveLoanReturn(event) {
-    event.preventDefault();
-    if (!editingLoanId) return;
-    
-    const status = document.getElementById('loanReturnStatus').value;
-    const newDate = document.getElementById('newReturnDate').value;
-    const notes = document.getElementById('returnNotes').value;
-    const partialAmount = status === 'partial' ? parseCLP(document.getElementById('partialReturnAmount').value) : 0;
-    
-    const transaction = db.transaction(['loans'], 'readwrite');
-    const store = transaction.objectStore('loans');
-    const getRequest = store.get(editingLoanId);
-    
-    getRequest.onsuccess = () => {
-        const loan = getRequest.result;
-        loan.status = status;
-        if (newDate) loan.dueDate = newDate;
-        
-        if (!loan.returnHistory) loan.returnHistory = [];
-        loan.returnHistory.push({
-            date: new Date().toISOString(),
-            status: status,
-            amount: partialAmount,
-            notes: notes
-        });
-        
-        const updateRequest = store.put(loan);
-        updateRequest.onsuccess = () => {
-            alert('Préstamo actualizado exitosamente');
-            closeModal('updateLoanReturnModal');
-            loadLoans();
-            checkLoanDates();
-            updateDashboard();
-        };
     };
 }
 
 function loadLoans() {
     const transaction = db.transaction(['loans'], 'readonly');
-    const store = transaction.objectStore('loans');
-    const request = store.getAll();
+    const request = transaction.objectStore('loans').getAll();
     
     request.onsuccess = () => {
         const loans = request.result;
         const container = document.getElementById('loansList');
-        
         if (loans.length === 0) {
-            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔄</div><p>No hay préstamos registrados</p></div>';
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🔄</div><p>No hay préstamos</p></div>';
             return;
         }
-        
-        container.innerHTML = loans.map(loan => {
-            const typeIcon = loan.type === 'egreso' ? '📤' : '📥';
-            const typeLabel = loan.type === 'egreso' ? 'Yo presté' : 'Me prestaron';
-            const statusIcon = loan.status === 'completed' ? '✅' : loan.status === 'partial' ? '⚠️' : '⏳';
-            const dueDate = new Date(loan.dueDate);
-            const today = new Date();
-            const isOverdue = dueDate < today && loan.status === 'pending';
-            
-            let scheduleHTML = '';
-            if (loan.paymentSchedule && loan.paymentSchedule.length > 0) {
-                scheduleHTML = `
-                    <div class="payment-schedule">
-                        <h4>📅 Calendario de Cuotas:</h4>
-                        ${loan.paymentSchedule.map(payment => {
-                            const payDate = new Date(payment.date);
-                            const isPaid = payment.status === 'paid';
-                            const isOverduePayment = payDate < today && payment.status === 'pending';
-                            return `
-                                <div class="payment-row ${isPaid ? 'paid' : ''} ${isOverduePayment ? 'overdue' : ''}">
-                                    <strong>Cuota ${payment.number}</strong>
-                                    <span>${payDate.toLocaleDateString('es-CL')}</span>
-                                    <span>${formatCLP(payment.amount)}</span>
-                                    <span>${payment.status === 'paid' ? '✅' : isOverduePayment ? '❌' : '⏳'}</span>
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                `;
-            }
-            
-            return `
-                <div class="transaction-item" style="border-left-color: ${isOverdue ? '#f44336' : '#ff9800'};">
-                    <div class="transaction-info">
-                        <h4>${typeIcon} ${loan.person} - ${typeLabel}</h4>
-                        <p>${loan.paymentType === 'single' ? '💵 Pago Único' : `📅 ${loan.paymentSchedule.length} Cuotas`} • ${new Date(loan.createdDate).toLocaleDateString('es-CL')}</p>
-                        <p style="color: ${isOverdue ? '#f44336' : '#666'}; font-weight: 500;">Vence: ${dueDate.toLocaleDateString('es-CL')} ${statusIcon}</p>
-                        ${loan.description ? `<p style="font-size: 12px; color: #999;">📝 ${loan.description}</p>` : ''}
-                        ${scheduleHTML}
-                    </div>
-                    <div style="text-align: right;">
-                        <div style="font-weight: bold; color: #ff9800; margin-bottom: 8px;">${formatCLP(loan.amount)}</div>
-                        <button onclick="editLoanReturn(${loan.id})" class="btn-small btn-primary" style="margin-right: 5px;">📅 Actualizar</button>
-                        <button onclick="deleteLoan(${loan.id})" class="btn-small btn-danger">🗑️</button>
-                    </div>
+        container.innerHTML = loans.map(loan => `
+            <div class="budget-card">
+                <div class="budget-header">
+                    <h4>${loan.person}</h4>
+                    <div class="amount">${formatCLP(loan.amount)}</div>
                 </div>
-            `;
-        }).join('');
+                <p style="margin: 0; font-size: 12px; color: #666;">Vence: ${new Date(loan.dueDate).toLocaleDateString('es-CL')}</p>
+                <button onclick="deleteLoan(${loan.id})" class="btn-small btn-danger" style="margin-top: 10px;">🗑️</button>
+            </div>
+        `).join('');
     };
 }
 
 function deleteLoan(id) {
     if (!confirm('¿Estás seguro?')) return;
-    const transaction = db.transaction(['loans'], 'readwrite');
-    const store = transaction.objectStore('loans');
-    store.delete(id);
-    
-    transaction.oncomplete = () => {
-        loadLoans();
-        updateDashboard();
-    };
+    db.transaction(['loans'], 'readwrite').objectStore('loans').delete(id);
 }
 
-// CRÉDITOS MEJORADOS
 function saveCredit(event) {
     event.preventDefault();
-    const description = document.getElementById('creditDescription').value;
-    const amount = parseCLP(document.getElementById('creditAmount').value);
-    const installments = parseInt(document.getElementById('creditInstallments').value);
-    const monthlyPayment = parseCLP(document.getElementById('creditMonthlyPayment').value);
-    const paid = parseCLP(document.getElementById('creditPaid').value);
-    const rate = parseFloat(document.getElementById('creditRate').value) || 0;
-    const firstPaymentDate = document.getElementById('creditFirstPaymentDate').value;
-    const dueDate = document.getElementById('creditDueDate').value;
-    
-    if (!description || !amount || !installments || !monthlyPayment || !firstPaymentDate || !dueDate) {
-        alert('Por favor completa todos los campos requeridos');
-        return;
-    }
-    
-    // Generar cronograma de pagos
-    const paymentSchedule = [];
-    for (let i = 0; i < installments; i++) {
-        const paymentDate = addMonthsToDate(new Date(firstPaymentDate), i);
-        paymentSchedule.push({
-            number: i + 1,
-            date: paymentDate.toISOString().split('T')[0],
-            amount: monthlyPayment,
-            status: 'pending'
-        });
-    }
-    
     const credit = {
-        description,
-        amount,
-        installments,
-        monthlyPayment,
-        paid,
-        rate,
-        firstPaymentDate,
-        dueDate,
-        paymentSchedule,
-        status: paid >= amount ? 'completed' : 'active',
+        description: document.getElementById('creditDescription').value,
+        amount: parseCLP(document.getElementById('creditAmount').value),
+        installments: parseInt(document.getElementById('creditInstallments').value),
+        monthlyPayment: parseCLP(document.getElementById('creditMonthlyPayment').value),
+        paid: parseCLP(document.getElementById('creditPaid').value),
         timestamp: new Date().getTime()
     };
     
     const transaction = db.transaction(['credits'], 'readwrite');
-    const store = transaction.objectStore('credits');
-    store.add(credit);
-    
+    transaction.objectStore('credits').add(credit);
     transaction.oncomplete = () => {
-        alert('Crédito guardado exitosamente');
+        alert('Crédito guardado');
         closeModal('creditModal');
-        document.getElementById('creditModal').querySelector('form').reset();
         loadCredits();
         updateDashboard();
-    };
-}
-
-function checkCreditDates() {
-    const transaction = db.transaction(['credits'], 'readonly');
-    const store = transaction.objectStore('credits');
-    const request = store.getAll();
-    
-    request.onsuccess = () => {
-        const credits = request.result;
-        const today = new Date().toISOString().split('T')[0];
-        const alerts = [];
-        
-        credits.forEach(credit => {
-            if (credit.status === 'active' && credit.dueDate <= today && credit.paid < credit.amount) {
-                alerts.push(credit);
-            }
-        });
-        
-        const alertContainer = document.getElementById('creditsAlerts');
-        if (alerts.length > 0) {
-            alertContainer.innerHTML = alerts.map(credit => `
-                <div class="alert-box danger">
-                    <strong>⚠️ Crédito Vencido:</strong> ${credit.description}
-                    <br><small>Pendiente: ${formatCLP(credit.amount - credit.paid)} • Vence: ${new Date(credit.dueDate).toLocaleDateString('es-CL')}</small>
-                </div>
-            `).join('');
-        } else {
-            alertContainer.innerHTML = '';
-        }
     };
 }
 
 function loadCredits() {
     const transaction = db.transaction(['credits'], 'readonly');
-    const store = transaction.objectStore('credits');
-    const request = store.getAll();
+    const request = transaction.objectStore('credits').getAll();
     
     request.onsuccess = () => {
         const credits = request.result;
         const container = document.getElementById('creditsList');
-        
         if (credits.length === 0) {
-            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💳</div><p>No hay créditos registrados</p></div>';
+            container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💳</div><p>No hay créditos</p></div>';
             return;
         }
-        
-        container.innerHTML = credits.map(credit => {
-            const percentage = (credit.paid / credit.amount) * 100;
-            const daysRemaining = Math.ceil((new Date(credit.dueDate) - new Date()) / (1000 * 60 * 60 * 24));
-            const today = new Date().toISOString().split('T')[0];
-            
-            let scheduleHTML = '';
-            if (credit.paymentSchedule && credit.paymentSchedule.length > 0) {
-                scheduleHTML = `
-                    <div class="payment-schedule">
-                        <h4>📅 Cronograma de Cuotas:</h4>
-                        ${credit.paymentSchedule.slice(0, 5).map(payment => {
-                            const isOverdue = payment.date <= today && payment.status === 'pending';
-                            return `
-                                <div class="payment-row ${isOverdue ? 'overdue' : ''}">
-                                    <strong>Cuota ${payment.number}</strong>
-                                    <span>${new Date(payment.date).toLocaleDateString('es-CL')}</span>
-                                    <span>${formatCLP(payment.amount)}</span>
-                                    <span>${isOverdue ? '❌' : '⏳'}</span>
-                                </div>
-                            `;
-                        }).join('')}
-                        ${credit.paymentSchedule.length > 5 ? `<p style="font-size: 12px; color: #999; margin-top: 5px;">... y ${credit.paymentSchedule.length - 5} cuota(s) más</p>` : ''}
-                    </div>
-                `;
-            }
-            
-            return `
-                <div class="transaction-item">
-                    <div class="transaction-info">
-                        <h4>💳 ${credit.description}</h4>
-                        <p>${credit.installments} cuotas de ${formatCLP(credit.monthlyPayment)} • ${credit.rate > 0 ? `Tasa: ${credit.rate}%` : 'Sin interés'}</p>
-                        <div style="margin-top: 8px;">
-                            <div style="background: #eee; height: 8px; border-radius: 4px; overflow: hidden;">
-                                <div style="background: ${percentage < 100 ? '#2196F3' : '#4CAF50'}; height: 100%; width: ${percentage}%; transition: width 0.3s;"></div>
-                            </div>
-                            <p style="font-size: 11px; margin-top: 4px; color: #666;">Pagado: ${formatCLP(credit.paid)} / ${formatCLP(credit.amount)} (${percentage.toFixed(1)}%)</p>
-                        </div>
-                        <p style="font-size: 12px; color: ${daysRemaining < 30 ? '#f44336' : '#999'}; margin-top: 4px;">
-                            ${daysRemaining > 0 ? `Vence en ${daysRemaining} días` : '⚠️ Vencido'}
-                        </p>
-                        ${scheduleHTML}
-                    </div>
-                    <div style="text-align: right;">
-                        <div style="font-weight: bold; color: #2196F3; margin-bottom: 8px;">${formatCLP(credit.amount - credit.paid)}</div>
-                        <button onclick="deleteCredit(${credit.id})" class="btn-small btn-danger">🗑️</button>
-                    </div>
+        container.innerHTML = credits.map(credit => `
+            <div class="budget-card">
+                <div class="budget-header">
+                    <h4>💳 ${credit.description}</h4>
+                    <div class="amount">${formatCLP(credit.monthlyPayment)}/mes</div>
                 </div>
-            `;
-        }).join('');
-    };
-}
-
-function deleteCredit(id) {
-    if (!confirm('¿Estás seguro?')) return;
-    const transaction = db.transaction(['credits'], 'readwrite');
-    const store = transaction.objectStore('credits');
-    store.delete(id);
-    
-    transaction.oncomplete = () => {
-        loadCredits();
-        updateDashboard();
+                <p style="margin: 0; font-size: 12px; color: #666;">${credit.installments} cuotas de ${formatCLP(credit.monthlyPayment)}</p>
+            </div>
+        `).join('');
     };
 }
 
 // DASHBOARD
 function updateDashboard() {
     const currentMonth = getCurrentMonth();
-    
-    const transaction = db.transaction(['expenses', 'income', 'loans', 'credits'], 'readonly');
+    const transaction = db.transaction(['expenses', 'income', 'budgets', 'credits'], 'readonly');
     
     const expenseStore = transaction.objectStore('expenses');
     const incomeStore = transaction.objectStore('income');
-    const loansStore = transaction.objectStore('loans');
-    const creditsStore = transaction.objectStore('credits');
+    const budgetStore = transaction.objectStore('budgets');
+    const creditStore = transaction.objectStore('credits');
     
-    const expensesRequest = expenseStore.getAll();
-    const incomeRequest = incomeStore.getAll();
-    const loansRequest = loansStore.getAll();
-    const creditsRequest = creditsStore.getAll();
+    let allExpenses = [];
+    let allIncomes = [];
+    let currentBudget = null;
+    let allCredits = [];
     
-    let expenses = [];
-    let incomes = [];
-    let loans = [];
-    let credits = [];
-    
-    expensesRequest.onsuccess = () => {
-        expenses = expensesRequest.result.filter(e => e.date.startsWith(currentMonth));
+    expenseStore.getAll().onsuccess = (e) => {
+        allExpenses = e.target.result.filter(ex => ex.date.startsWith(currentMonth));
     };
     
-    incomeRequest.onsuccess = () => {
-        incomes = incomeRequest.result.filter(i => i.date.startsWith(currentMonth));
+    incomeStore.getAll().onsuccess = (e) => {
+        allIncomes = e.target.result.filter(inc => inc.date.startsWith(currentMonth));
     };
     
-    loansRequest.onsuccess = () => {
-        loans = loansRequest.result;
+    budgetStore.getAll().onsuccess = (e) => {
+        currentBudget = e.target.result.find(b => b.month === currentMonth);
     };
     
-    creditsRequest.onsuccess = () => {
-        credits = creditsRequest.result;
+    creditStore.getAll().onsuccess = (e) => {
+        allCredits = e.target.result;
         
-        const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-        const totalIncome = incomes.reduce((sum, i) => sum + i.amount, 0);
+        const totalExpenses = allExpenses.reduce((s, ex) => s + ex.amount, 0);
+        const totalIncome = allIncomes.reduce((s, inc) => s + inc.amount, 0);
         const balance = totalIncome - totalExpenses;
-        const toReturn = loans.reduce((sum, l) => {
-            if (l.status === 'pending') return sum + l.amount;
-            if (l.status === 'partial' && l.returnHistory) {
-                const partialReturned = l.returnHistory.filter(r => r.status === 'partial').reduce((s, r) => s + r.amount, 0);
-                return sum + (l.amount - partialReturned);
-            }
-            return sum;
-        }, 0);
         
         document.getElementById('totalExpenses').textContent = formatCLP(totalExpenses);
         document.getElementById('totalIncome').textContent = formatCLP(totalIncome);
         document.getElementById('balance').textContent = formatCLP(balance);
-        document.getElementById('toReturn').textContent = formatCLP(toReturn);
+        document.getElementById('budgetStatus').textContent = currentBudget ? formatCLP(Object.values(currentBudget.categories || {}).reduce((a,b) => a+b, 0)) : 'Sin plan';
         
-        updateRecentTransactions(expenses, incomes);
-        drawCategoryChart(expenses);
-        drawIncomeVsExpenseChart(totalIncome, totalExpenses);
+        renderBudgetVsActual(currentBudget, allExpenses, allCredits);
+        renderDashboardBudget(currentBudget, allExpenses);
+        showBudgetSuggestions(allExpenses, allIncomes, allCredits);
     };
 }
 
-function updateRecentTransactions(expenses, incomes) {
-    const all = [
-        ...expenses.map(e => ({ ...e, type: 'expense' })),
-        ...incomes.map(i => ({ ...i, type: 'income' }))
-    ];
+function renderBudgetVsActual(budget, expenses, credits) {
+    const ctx = document.getElementById('budgetVsActualChart');
+    if (!ctx || !budget) return;
     
-    all.sort((a, b) => new Date(b.date) - new Date(a.date));
-    const recent = all.slice(0, 5);
+    const labels = [];
+    const budgetData = [];
+    const actualData = [];
     
-    const container = document.getElementById('recentTransactions');
-    
-    if (recent.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div><p>No hay transacciones este mes</p></div>';
-        return;
+    for (const [key, cat] of Object.entries(CATEGORIES)) {
+        labels.push(cat.label);
+        budgetData.push(budget.categories[key] || 0);
+        actualData.push(expenses.filter(e => e.category === key).reduce((s, e) => s + e.amount, 0));
     }
     
-    container.innerHTML = recent.map(t => {
-        if (t.type === 'expense') {
-            return `
-                <div class="transaction-item">
-                    <div class="transaction-info">
-                        <h4>${CATEGORIES[t.category]?.icon || '📌'} ${CATEGORIES[t.category]?.label || 'Otra'}</h4>
-                        <p>${t.description} • ${new Date(t.date).toLocaleDateString('es-CL')}</p>
-                    </div>
-                    <div style="font-weight: bold; color: #f44336;">-${formatCLP(t.amount)}</div>
-                </div>
-            `;
-        } else {
-            return `
-                <div class="transaction-item">
-                    <div class="transaction-info">
-                        <h4>${INCOME_TYPES[t.type]?.icon || '📌'} ${INCOME_TYPES[t.type]?.label || 'Otro'}</h4>
-                        <p>${t.description} • ${new Date(t.date).toLocaleDateString('es-CL')}</p>
-                    </div>
-                    <div style="font-weight: bold; color: #4CAF50;">+${formatCLP(t.amount)}</div>
-                </div>
-            `;
-        }
-    }).join('');
-}
-
-// GRÁFICOS
-function drawCategoryChart(expenses) {
-    const ctx = document.getElementById('categoryChart');
-    if (!ctx) return;
+    if (budgetVsActualChartInstance) budgetVsActualChartInstance.destroy();
     
-    const categories = {};
-    for (const [key] of Object.entries(CATEGORIES)) {
-        categories[key] = expenses.filter(e => e.category === key).reduce((sum, e) => sum + e.amount, 0);
-    }
-    
-    const labels = Object.keys(categories).map(k => CATEGORIES[k]?.label || k);
-    const data = Object.values(categories);
-    
-    if (categoryChartInstance) categoryChartInstance.destroy();
-    
-    categoryChartInstance = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: labels,
-            datasets: [{
-                data: data,
-                backgroundColor: ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2']
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'bottom' }
-            }
-        }
-    });
-}
-
-function drawIncomeVsExpenseChart(income, expenses) {
-    const ctx = document.getElementById('incomeVsExpenseChart');
-    if (!ctx) return;
-    
-    if (incomeVsExpenseChartInstance) incomeVsExpenseChartInstance.destroy();
-    
-    incomeVsExpenseChartInstance = new Chart(ctx, {
+    budgetVsActualChartInstance = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: ['Ingresos', 'Gastos'],
-            datasets: [{
-                label: 'Monto CLP',
-                data: [income, expenses],
-                backgroundColor: ['#4CAF50', '#f44336']
-            }]
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Presupuesto',
+                    data: budgetData,
+                    backgroundColor: '#667eea'
+                },
+                {
+                    label: 'Gasto Real',
+                    data: actualData,
+                    backgroundColor: '#f44336'
+                }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
             scales: {
                 y: { beginAtZero: true }
             }
@@ -935,138 +759,166 @@ function drawIncomeVsExpenseChart(income, expenses) {
     });
 }
 
-// PRONÓSTICO DE 6 MESES
+function renderDashboardBudget(budget, expenses) {
+    if (!budget) return;
+    
+    const container = document.getElementById('dashboardBudget');
+    let html = '';
+    
+    for (const [key, cat] of Object.entries(CATEGORIES)) {
+        const budgetAmount = budget.categories[key] || 0;
+        const spent = expenses.filter(e => e.category === key).reduce((s, e) => s + e.amount, 0);
+        const percentage = budgetAmount > 0 ? (spent / budgetAmount) * 100 : 0;
+        
+        html += `
+            <div class="budget-card">
+                <div class="budget-header">
+                    <h4>${cat.icon} ${cat.label}</h4>
+                    <div class="amount">${formatCLP(spent)} / ${formatCLP(budgetAmount)}</div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill ${percentage > 100 ? 'danger' : percentage > 80 ? 'warning' : ''}" style="width: ${Math.min(percentage, 100)}%"></div>
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+function showBudgetSuggestions(expenses, incomes, credits) {
+    const container = document.getElementById('budgetSuggestions');
+    const transaction = db.transaction(['budgets'], 'readonly');
+    const request = transaction.objectStore('budgets').getAll();
+    
+    request.onsuccess = () => {
+        const budgets = request.result;
+        const last3Months = [];
+        const today = new Date();
+        
+        for (let i = 0; i < 3; i++) {
+            const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+            last3Months.push(getMonthFromDate(date));
+        }
+        
+        // Encontrar categorías sin presupuesto en los últimos 3 meses
+        const categoriesWithoutBudget = {};
+        
+        for (const [key, cat] of Object.entries(CATEGORIES)) {
+            let count = 0;
+            for (const month of last3Months) {
+                const budget = budgets.find(b => b.month === month);
+                if (!budget || !budget.categories[key] || budget.categories[key] === 0) {
+                    count++;
+                }
+            }
+            if (count === 3) {
+                categoriesWithoutBudget[key] = cat;
+            }
+        }
+        
+        let suggestions = '';
+        
+        // Sugerencia 1: Categorías sin presupuesto
+        if (Object.keys(categoriesWithoutBudget).length > 0) {
+            // Calcular promedio de ingresos últimos 3 meses
+            const last3MonthsIncome = incomes.filter(i => last3Months.includes(i.date.substring(0, 7)));
+            const avgIncome = last3MonthsIncome.length > 0
+                ? last3MonthsIncome.reduce((s, i) => s + i.amount, 0) / 3
+                : 0;
+            
+            suggestions += `
+                <div class="suggestion-box">
+                    <h4>💡 Sugerencia: Agregar Presupuesto</h4>
+                    <p>Las siguientes categorías no tienen presupuesto asignado en los últimos 3 meses:</p>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        ${Object.entries(categoriesWithoutBudget).map(([key, cat]) => `
+                            <li>${cat.icon} ${cat.label}</li>
+                        `).join('')}
+                    </ul>
+                    <p>Tu ingreso promedio de los últimos 3 meses es: <strong>${formatCLP(avgIncome)}</strong></p>
+                    <p>Considera asignar presupuestos a estas categorías sin exceder tu ingreso promedio.</p>
+                </div>
+            `;
+        }
+        
+        // Sugerencia 2: Categorías con sobrante
+        const currentMonth = getCurrentMonth();
+        const currentBudget = budgets.find(b => b.month === currentMonth);
+        
+        if (currentBudget && Object.keys(categoriesWithoutBudget).length > 0) {
+            const surplusCategories = [];
+            const monthExpenses = expenses.filter(e => e.date.startsWith(currentMonth));
+            
+            for (const [key, cat] of Object.entries(CATEGORIES)) {
+                const budgetAmount = currentBudget.categories[key] || 0;
+                const spent = monthExpenses.filter(e => e.category === key).reduce((s, e) => s + e.amount, 0);
+                const surplus = budgetAmount - spent;
+                
+                if (surplus > 10000) { // Si hay más de $10.000 de sobrante
+                    surplusCategories.push({ key, cat, surplus });
+                }
+            }
+            
+            if (surplusCategories.length > 0) {
+                suggestions += `
+                    <div class="suggestion-box" style="background: #e8f5e9; border-left-color: #4CAF50;">
+                        <h4 style="color: #2e7d32;">✅ Reasignación Sugerida</h4>
+                        <p>Puedes reasignar presupuesto de estas categorías que tienen sobrante:</p>
+                        <ul style="margin: 10px 0; padding-left: 20px;">
+                            ${surplusCategories.map(({cat, surplus}) => `
+                                <li>${cat.icon} ${cat.label}: ${formatCLP(surplus)} disponible</li>
+                            `).join('')}
+                        </ul>
+                        <p>Total disponible para reasignar: <strong>${formatCLP(surplusCategories.reduce((s, c) => s + c.surplus, 0))}</strong></p>
+                    </div>
+                `;
+            } else {
+                suggestions += `
+                    <div class="suggestion-box" style="background: #fff3cd; border-left-color: #ffc107;">
+                        <h4 style="color: #856404;">⚠️ Revisar Presupuesto</h4>
+                        <p>No hay categorías con presupuesto sobrante para reasignar. Por favor revisa tu presupuesto general.</p>
+                    </div>
+                `;
+            }
+        }
+        
+        container.innerHTML = suggestions;
+    };
+}
+
 function loadForecastData() {
     const transaction = db.transaction(['expenses', 'income'], 'readonly');
     const expenseStore = transaction.objectStore('expenses');
     const incomeStore = transaction.objectStore('income');
     
-    const expensesRequest = expenseStore.getAll();
-    const incomeRequest = incomeStore.getAll();
-    
-    expensesRequest.onsuccess = () => {
-        incomeRequest.onsuccess = () => {
-            generateForecastSummary(expensesRequest.result, incomeRequest.result);
+    expenseStore.getAll().onsuccess = (e1) => {
+        incomeStore.getAll().onsuccess = (e2) => {
+            const allExpenses = e1.target.result;
+            const allIncomes = e2.target.result;
+            const months = [];
+            const today = new Date();
+            
+            for (let i = 0; i < 6; i++) {
+                const date = new Date(today.getFullYear(), today.getMonth() + i, 1);
+                months.push(date);
+            }
+            
+            const forecastData = months.map(month => {
+                const monthStr = getMonthFromDate(month);
+                const monthExpenses = allExpenses.filter(e => e.date.startsWith(monthStr));
+                const monthIncomes = allIncomes.filter(i => i.date.startsWith(monthStr));
+                
+                return {
+                    month: month,
+                    expenses: monthExpenses.reduce((s, e) => s + e.amount, 0),
+                    income: monthIncomes.reduce((s, i) => s + i.amount, 0)
+                };
+            });
+            
+            window.forecastData = forecastData;
         };
     };
-}
-
-function generateForecastSummary(allExpenses, allIncomes) {
-    const months = [];
-    const today = new Date();
-    
-    for (let i = 0; i < 6; i++) {
-        const date = new Date(today.getFullYear(), today.getMonth() + i, 1);
-        months.push(date);
-    }
-    
-    const forecastData = months.map(month => {
-        const monthStr = getMonthFromDate(month);
-        const monthExpenses = allExpenses.filter(e => e.date.startsWith(monthStr));
-        const monthIncomes = allIncomes.filter(i => i.date.startsWith(monthStr));
-        
-        const totalExp = monthExpenses.reduce((sum, e) => sum + e.amount, 0);
-        const totalInc = monthIncomes.reduce((sum, i) => sum + i.amount, 0);
-        
-        return {
-            month: month,
-            monthStr: monthStr,
-            expenses: totalExp,
-            income: totalInc,
-            balance: totalInc - totalExp
-        };
-    });
-    
-    window.forecastData = forecastData;
-    updateForecastSummary(forecastData);
-}
-
-function updateForecastSummary(data) {
-    const container = document.getElementById('forecastSummary');
-    container.innerHTML = data.map(d => `
-        <div class="summary-card">
-            <h3>${MONTHS_LABELS[d.month.getMonth()]} ${d.month.getFullYear()}</h3>
-            <p style="font-size: 12px; color: rgba(255,255,255,0.9);">Ingresos</p>
-            <div class="amount">${formatCLP(d.income)}</div>
-            <p style="font-size: 12px; color: rgba(255,255,255,0.9); margin-top: 8px;">Gastos: ${formatCLP(d.expenses)}</p>
-        </div>
-    `).join('');
-}
-
-function drawExpensesForecast() {
-    if (!window.forecastData) return;
-    const ctx = document.getElementById('expensesForecastChart');
-    if (!ctx) return;
-    
-    const labels = window.forecastData.map(d => MONTHS_LABELS[d.month.getMonth()]);
-    const data = window.forecastData.map(d => d.expenses);
-    
-    if (expensesForecastChartInstance) expensesForecastChartInstance.destroy();
-    
-    expensesForecastChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Gastos Proyectados',
-                data: data,
-                borderColor: '#f44336',
-                backgroundColor: 'rgba(244, 67, 54, 0.1)',
-                tension: 0.3,
-                fill: true,
-                pointRadius: 5,
-                pointHoverRadius: 7
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: true }
-            },
-            scales: {
-                y: { beginAtZero: true }
-            }
-        }
-    });
-}
-
-function drawIncomeForecast() {
-    if (!window.forecastData) return;
-    const ctx = document.getElementById('incomeForecastChart');
-    if (!ctx) return;
-    
-    const labels = window.forecastData.map(d => MONTHS_LABELS[d.month.getMonth()]);
-    const data = window.forecastData.map(d => d.income);
-    
-    if (incomeForecastChartInstance) incomeForecastChartInstance.destroy();
-    
-    incomeForecastChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Ingresos Proyectados',
-                data: data,
-                borderColor: '#4CAF50',
-                backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                tension: 0.3,
-                fill: true,
-                pointRadius: 5,
-                pointHoverRadius: 7
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: true }
-            },
-            scales: {
-                y: { beginAtZero: true }
-            }
-        }
-    });
 }
 
 function drawBalanceForecast() {
@@ -1075,7 +927,7 @@ function drawBalanceForecast() {
     if (!ctx) return;
     
     const labels = window.forecastData.map(d => MONTHS_LABELS[d.month.getMonth()]);
-    const data = window.forecastData.map(d => d.balance);
+    const balances = window.forecastData.map(d => d.income - d.expenses);
     
     if (balanceForecastChartInstance) balanceForecastChartInstance.destroy();
     
@@ -1085,142 +937,47 @@ function drawBalanceForecast() {
             labels: labels,
             datasets: [{
                 label: 'Balance Proyectado',
-                data: data,
-                backgroundColor: data.map(d => d >= 0 ? '#4CAF50' : '#f44336')
+                data: balances,
+                backgroundColor: balances.map(b => b >= 0 ? '#4CAF50' : '#f44336')
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                y: { beginAtZero: true }
-            }
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true } }
         }
     });
 }
 
-// GESTIÓN DE CATEGORÍAS
-function renderCategories() {
-    const container = document.getElementById('categoriesList');
-    
-    container.innerHTML = Object.entries(CATEGORIES).map(([key, cat]) => `
-        <div class="category-card">
-            <div style="display: flex; align-items: center; flex: 1;">
-                <div class="icon">${cat.icon}</div>
-                <div class="info">
-                    <h4>${cat.label}</h4>
-                    <p style="font-size: 12px; color: #999;">ID: ${key}</p>
-                </div>
-            </div>
-            <div class="actions">
-                <button onclick="editCategory('${key}')" class="btn-small" style="background: #667eea; color: white;">✏️</button>
-                <button onclick="deleteCategory('${key}')" class="btn-small btn-danger">🗑️</button>
-            </div>
-        </div>
-    `).join('');
-}
-
-function saveNewCategory(event) {
-    event.preventDefault();
-    const icon = document.getElementById('categoryIcon').value.trim();
-    const name = document.getElementById('categoryName').value.trim();
-    
-    if (!icon || !name) {
-        alert('Por favor completa todos los campos');
-        return;
-    }
-    
-    const newKey = name.toLowerCase().replace(/\s+/g, '_');
-    
-    if (CATEGORIES[newKey]) {
-        alert('Esta categoría ya existe');
-        return;
-    }
-    
-    CATEGORIES[newKey] = { icon, label: name };
-    localStorage.setItem('categories', JSON.stringify(CATEGORIES));
-    
-    alert('Categoría agregada exitosamente');
-    closeModal('newCategoryModal');
-    document.getElementById('newCategoryModal').querySelector('form').reset();
-    renderCategories();
-    loadCategoryDropdown('expenseCategory');
-}
-
-function editCategory(key) {
-    const newName = prompt('Nuevo nombre para la categoría:', CATEGORIES[key].label);
-    if (newName && newName.trim()) {
-        CATEGORIES[key].label = newName.trim();
-        localStorage.setItem('categories', JSON.stringify(CATEGORIES));
-        renderCategories();
-        alert('Categoría actualizada');
-    }
-}
-
-function deleteCategory(key) {
-    if (!confirm('¿Estás seguro? Los gastos de esta categoría no se eliminarán, solo la categoría.')) return;
-    
-    delete CATEGORIES[key];
-    localStorage.setItem('categories', JSON.stringify(CATEGORIES));
-    renderCategories();
-    alert('Categoría eliminada');
-}
-
-// EXPORTAR E IMPORTAR DATOS
 function exportData() {
-    const transaction = db.transaction(['expenses', 'income', 'loans', 'credits'], 'readonly');
-    const expenseStore = transaction.objectStore('expenses');
-    const incomeStore = transaction.objectStore('income');
-    const loansStore = transaction.objectStore('loans');
-    const creditsStore = transaction.objectStore('credits');
+    const transaction = db.transaction(['expenses', 'income', 'loans', 'credits', 'budgets'], 'readonly');
+    let allData = {};
+    let completed = 0;
     
-    const expensesRequest = expenseStore.getAll();
-    const incomeRequest = incomeStore.getAll();
-    const loansRequest = loansStore.getAll();
-    const creditsRequest = creditsStore.getAll();
-    
-    let expenses = [];
-    let incomes = [];
-    let loans = [];
-    let credits = [];
-    
-    expensesRequest.onsuccess = () => {
-        expenses = expensesRequest.result;
-    };
-    
-    incomeRequest.onsuccess = () => {
-        incomes = incomeRequest.result;
-    };
-    
-    loansRequest.onsuccess = () => {
-        loans = loansRequest.result;
-    };
-    
-    creditsRequest.onsuccess = () => {
-        credits = creditsRequest.result;
-        
-        const data = {
-            version: '4.2.0',
-            timestamp: new Date().toISOString(),
-            categories: CATEGORIES,
-            expenses: expenses,
-            incomes: incomes,
-            loans: loans,
-            credits: credits
+    ['expenses', 'income', 'loans', 'credits', 'budgets'].forEach(storeName => {
+        transaction.objectStore(storeName).getAll().onsuccess = (e) => {
+            allData[storeName] = e.target.result;
+            completed++;
+            
+            if (completed === 5) {
+                const data = {
+                    version: '4.3.0',
+                    timestamp: new Date().toISOString(),
+                    categories: CATEGORIES,
+                    ...allData
+                };
+                
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `finanzas-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
         };
-        
-        const dataStr = JSON.stringify(data, null, 2);
-        const blob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `finanzas-backup-${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-    };
+    });
 }
 
 function importData(event) {
@@ -1231,65 +988,39 @@ function importData(event) {
     reader.onload = (e) => {
         try {
             const data = JSON.parse(e.target.result);
+            if (!confirm('¿Restaurar todos los datos?')) return;
             
-            if (!confirm('¿Deseas restaurar todos los datos del backup? Esto sobrescribirá los datos actuales.')) return;
-            
-            clearDatabase().then(() => {
-                const transaction = db.transaction(['expenses', 'income', 'loans', 'credits'], 'readwrite');
-                const expenseStore = transaction.objectStore('expenses');
-                const incomeStore = transaction.objectStore('income');
-                const loansStore = transaction.objectStore('loans');
-                const creditsStore = transaction.objectStore('credits');
-                
-                data.expenses.forEach(exp => expenseStore.add(exp));
-                data.incomes.forEach(inc => incomeStore.add(inc));
-                data.loans.forEach(loan => loansStore.add(loan));
-                data.credits.forEach(credit => creditsStore.add(credit));
-                
-                CATEGORIES = data.categories || CATEGORIES;
-                localStorage.setItem('categories', JSON.stringify(CATEGORIES));
-                
-                transaction.oncomplete = () => {
-                    alert('Datos restaurados exitosamente');
-                    updateDashboard();
-                    renderCategories();
-                };
+            const transaction = db.transaction(['expenses', 'income', 'loans', 'credits', 'budgets'], 'readwrite');
+            ['expenses', 'income', 'loans', 'credits', 'budgets'].forEach(store => {
+                transaction.objectStore(store).clear();
+                (data[store] || []).forEach(item => {
+                    delete item.id;
+                    transaction.objectStore(store).add(item);
+                });
             });
+            
+            CATEGORIES = data.categories || CATEGORIES;
+            localStorage.setItem('categories', JSON.stringify(CATEGORIES));
+            alert('Datos restaurados');
+            updateDashboard();
         } catch (error) {
-            alert('Error al importar: ' + error.message);
+            alert('Error: ' + error.message);
         }
     };
     reader.readAsText(file);
 }
 
-function clearDatabase() {
-    return new Promise((resolve) => {
-        const transaction = db.transaction(['expenses', 'income', 'loans', 'credits'], 'readwrite');
-        const expenseStore = transaction.objectStore('expenses');
-        const incomeStore = transaction.objectStore('income');
-        const loansStore = transaction.objectStore('loans');
-        const creditsStore = transaction.objectStore('credits');
-        
-        expenseStore.clear();
-        incomeStore.clear();
-        loansStore.clear();
-        creditsStore.clear();
-        
-        transaction.oncomplete = () => resolve();
-    });
-}
-
 function clearAllData() {
-    if (!confirm('⚠️ ¿Estás completamente seguro? Esto eliminará TODOS tus datos. No se puede deshacer.')) return;
-    if (!confirm('Segunda confirmación: ¿Deseas eliminar todos los datos?')) return;
+    if (!confirm('¿Eliminar TODOS los datos?')) return;
+    if (!confirm('Segunda confirmación - ¿Estás seguro?')) return;
     
-    clearDatabase().then(() => {
-        CATEGORIES = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
-        localStorage.setItem('categories', JSON.stringify(CATEGORIES));
-        alert('Todos los datos han sido eliminados');
-        updateDashboard();
-        renderCategories();
+    const transaction = db.transaction(['expenses', 'income', 'loans', 'credits', 'budgets'], 'readwrite');
+    ['expenses', 'income', 'loans', 'credits', 'budgets'].forEach(store => {
+        transaction.objectStore(store).clear();
     });
+    
+    alert('Datos eliminados');
+    updateDashboard();
 }
 
 // INICIALIZACIÓN
@@ -1298,9 +1029,8 @@ document.addEventListener('DOMContentLoaded', () => {
         updateMonthDisplay();
         loadCategoryDropdown('expenseCategory');
         updateDashboard();
-        renderCategories();
     }).catch(err => {
-        console.error('Error inicializando DB:', err);
-        alert('Error al inicializar la aplicación. Por favor recarga la página.');
+        console.error('Error:', err);
+        alert('Error al inicializar la aplicación');
     });
 });
